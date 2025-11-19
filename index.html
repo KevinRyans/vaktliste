@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <link rel="canonical" href="https://vaktliste.xyz/" />
+  <title>Vaktliste-leser</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="accessGate" class="gate hidden">
+    <div class="gate-card">
+      <h2>Velkommen</h2>
+      <p>Skriv inn koden du har fått for å åpne vaktlisten.</p>
+      <input type="password" id="accessCode" placeholder="Kode" inputmode="numeric" />
+      <button type="button" id="accessEnter">Lås opp</button>
+      <p id="accessError" class="gate-error hidden">Feil kode. Prøv igjen.</p>
+    </div>
+  </div>
+  <main class="app-shell">
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">Vaktliste</p>
+        <h1>Vaktliste F&B</h1>
+        <p class="lead">
+          Vaktlisten er hentet ut i fra Sarah sin Excel liste - dette er bare en enklere måte for å lese vaktlisten. Alle endringer som skjer i den opprinnelige listen vil vises her automatisk 30 minutter etter endring.<br><br><br><br><br><br><br><br><br>       Laget med ❤️ av Kjell 
+        </p>
+        <p class="domain-hint">Publiseres på <strong>https://vaktliste.xyz</strong> når Cloudflare peker domenet hit.</p>
+      </div>
+      <div class="onboarding">
+        <h2>Slik fungerer det</h2>
+        <ol>
+          <li><strong>1.</strong> <span>Åpne appen – den kobler seg til den siste vaktplanen.</span></li>
+          <li><strong>2.</strong> <span>Velg avdeling og navn.</span></li>
+          <li><strong>3.</strong> <span>Skroll for å se vaktene dine (markerer også dagens vakt).</span></li>
+        </ol>
+        <p class="tip">
+          Oppdateres automatisk hvert 30. minutt. Hvis planen nylig er endret, trykk “Oppdater nå”.
+        </p>
+        <button type="button" data-role="refresh" class="refresh-top">Oppdater nå</button>
+      </div>
+    </header>
+
+    <section class="card selection-card">
+      <h3>Velg avdeling og navn</h3>
+      <div class="selectors">
+        <label>
+          Avdeling
+          <select id="departmentSelect" disabled>
+            <option value="">Ingen data</option>
+          </select>
+        </label>
+        <label>
+          Navn
+          <select id="personSelect" disabled>
+            <option value="">Velg avdeling først</option>
+          </select>
+        </label>
+      </div>
+      <div class="toggle">
+        <label class="switch">
+          <input type="checkbox" id="futureToggle" />
+          <span class="slider"></span>
+        </label>
+        <div>
+          <p class="toggle-title">Vis bare kommende vakter</p>
+          <p class="toggle-desc">Skru av for å se hele måneden.</p>
+        </div>
+      </div>
+      <p class="info" id="selectionInfo">Planen hentes automatisk – du trenger bare å velge deg selv.</p>
+      <p class="small subtle">Oppdateres også automatisk hvert 30. minutt. Trykk “Oppdater nå” hvis planen nettopp ble endret.</p>
+    </section>
+
+    <section class="card shift-card">
+      <div class="shift-card__header">
+        <div>
+          <h3>Vaktoversikt</h3>
+          <p class="small">Sorter automatisk etter dato. Dagens vakter blir markert.</p>
+        </div>
+      </div>
+      <div id="shiftList" class="shift-list empty">
+        <p>Ingen vakter å vise enda.</p>
+      </div>
+    </section>
+
+    <section class="card roster-card">
+      <div class="roster-card__header">
+        <div>
+          <h3>Hvem er på jobb</h3>
+          <p class="small">Velg avdeling og dato for å se alle medarbeidere som er satt opp den dagen.</p>
+        </div>
+        <div class="roster-controls">
+          <select id="rosterDepartmentSelect" disabled>
+            <option value="">Alle avdelinger</option>
+          </select>
+          <select id="rosterDateSelect" disabled>
+            <option value="">Ingen datoer</option>
+          </select>
+        </div>
+      </div>
+      <div id="rosterList" class="roster-list empty">
+        <p>Ingen dato valgt ennå.</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
