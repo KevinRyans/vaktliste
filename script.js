@@ -258,7 +258,13 @@
     setStatus(isInitial ? 'Henter vaktplan fra Google Sheets ...' : 'Oppdaterer vaktplan ...');
 
     try {
-      const response = await fetch(fetchUrl, { cache: 'no-cache' });
+      const response = await fetch(fetchUrl, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, max-age=0, must-revalidate',
+          Pragma: 'no-cache',
+        },
+      });
       if (!response.ok) {
         throw new Error('Klarte ikke å laste ned fra Google Sheets. Sjekk delingsinnstillingene.');
       }
@@ -270,6 +276,11 @@
       }
       applyFileMetadata(response);
       const buffer = await response.arrayBuffer();
+      if (looksLikeHtml(buffer)) {
+        throw new Error(
+          'Fikk HTML-innhold i stedet for Excel. Kontroller delingsrettigheter og prøv igjen.',
+        );
+      }
       await ingestWorkbook(buffer);
       persistData();
       const label = formatPlanLabel();
@@ -279,6 +290,7 @@
       setRefreshState('success');
     } catch (error) {
       handleError(error);
+      purgeCachedDatasetOnFailure();
       setRefreshState('idle');
     } finally {
       state.loading = false;
@@ -1015,6 +1027,34 @@
     }
   }
 
+  function purgeCachedDatasetOnFailure() {
+    window.localStorage.removeItem(storageKeys.data);
+    state.data = [];
+    state.lastUpdated = null;
+    buildRosterData();
+    disableSelectors();
+    renderRosterControls();
+    renderRosterList();
+    if (els.shiftList) {
+      els.shiftList.classList.add('empty');
+      els.shiftList.innerHTML = '<p>Kunne ikke hente fersk plan. Sjekk delingslenken og fors��k igjen.</p>';
+    }
+    if (els.info) {
+      els.info.textContent = 'Kunne ikke hente plan. Trykk "Oppdater nǾ" igjen etter at deling er i orden.';
+    }
+  }
+
+  function looksLikeHtml(buffer) {
+    if (!buffer) return false;
+    try {
+      const decoder = new TextDecoder('utf-8');
+      const snippet = decoder.decode(buffer.slice(0, 200)).toLowerCase();
+      return snippet.includes('<html') || snippet.includes('<!doctype html');
+    } catch (error) {
+      return false;
+    }
+  }
+
   function toISODateComponents(year, month, day) {
     const date = new Date(Date.UTC(year, month - 1, day));
     if (
@@ -1094,6 +1134,7 @@
     state.timers.forEach((timer) => clearInterval(timer));
   });
 })();
+
 
 
 
