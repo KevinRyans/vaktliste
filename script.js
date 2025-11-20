@@ -821,6 +821,65 @@
     button.setAttribute('aria-live', 'polite');
     button.innerHTML = `
       <span class="refresh-visual" aria-hidden="true">
+        <svg class="refresh-ring" viewBox="0 0 48 48">
+          <circle class="refresh-ring__bg" cx="24" cy="24" r="20" />
+          <circle class="refresh-ring__fg" cx="24" cy="24" r="20" />
+          <polyline class="refresh-check" points="14,24 21,31 34,18" />
+        </svg>
+      </span>
+      <span class="refresh-label">${label}</span>
+    `;
+  }
+
+  function setRefreshState(mode) {
+    if (!els.refreshButtons?.length) return;
+    clearTimeout(state.refreshTimeout);
+
+    if (mode === 'loading') {
+      state.refreshStartedAt = Date.now();
+    }
+
+    if (mode === 'success') {
+      const elapsed = Date.now() - state.refreshStartedAt;
+      const minimumSpin = 1300;
+      if (elapsed < minimumSpin) {
+        state.refreshTimeout = window.setTimeout(() => setRefreshState('success'), minimumSpin - elapsed);
+        return;
+      }
+    }
+
+    els.refreshButtons.forEach((button) => {
+      button.classList.remove('is-loading', 'is-success');
+      button.disabled = mode === 'loading';
+      button.setAttribute('aria-busy', mode === 'loading' ? 'true' : 'false');
+      if (mode === 'loading') {
+        button.classList.add('is-loading');
+      }
+      if (mode === 'success') {
+        button.classList.add('is-success');
+      }
+      if (mode === 'idle') {
+        const labelEl = button.querySelector('.refresh-label');
+        if (labelEl) {
+          labelEl.textContent = button.dataset.label || 'Oppdater nå';
+        }
+      }
+    });
+
+    if (mode === 'success') {
+      state.refreshTimeout = window.setTimeout(() => setRefreshState('idle'), 1400);
+    }
+  }
+
+  function enhanceRefreshButton(button) {
+    if (!button || button.dataset.decorated === 'true') return;
+    const label = button.textContent?.trim() || 'Oppdater nå';
+    button.dataset.decorated = 'true';
+    button.dataset.label = label;
+    button.classList.add('refresh-button');
+    button.setAttribute('aria-live', 'polite');
+    button.innerHTML = `
+      <span class="refresh-visual" aria-hidden="true">
         <span class="refresh-icon refresh-icon--spinner"></span>
         <span class="refresh-icon refresh-icon--check">✔</span>
       </span>
