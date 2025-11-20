@@ -164,7 +164,144 @@ h1 {
   display: inline-flex;
   justify-content: center;
   align-self: center;
-  width: min(220px, 100%);
+  width: min(240px, 100%);
+}
+
+.refresh-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  position: relative;
+  overflow: hidden;
+  min-width: 185px;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
+}
+
+.refresh-visual {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transform: translateY(6px) scale(0.5);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.refresh-ring {
+  width: 2.4rem;
+  height: 2.4rem;
+  transform: rotate(-90deg);
+}
+
+.refresh-ring__bg,
+.refresh-ring__fg {
+  fill: none;
+  stroke-width: 4;
+}
+
+.refresh-ring__bg {
+  stroke: rgba(255, 255, 255, 0.25);
+}
+
+.refresh-ring__fg {
+  stroke: #fff;
+  stroke-linecap: round;
+  stroke-dasharray: 188;
+  stroke-dashoffset: 188;
+  transform-origin: center;
+}
+
+.refresh-check {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 42;
+  stroke-dashoffset: 42;
+  opacity: 0;
+  transform-origin: center;
+  transition: stroke-dashoffset 0.35s ease 0.1s, opacity 0.2s ease 0.05s, transform 0.2s ease;
+}
+
+.refresh-button .refresh-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.refresh-button.is-loading .refresh-visual,
+.refresh-button.is-success .refresh-visual {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+
+.refresh-button.is-loading .refresh-ring {
+  animation: ring-spin 0.38s linear infinite;
+}
+
+.refresh-button.is-loading .refresh-ring__fg {
+  animation: ring-dash 0.95s ease-in-out infinite;
+}
+
+.refresh-button.is-success .refresh-ring {
+  animation: ring-settle 0.45s ease forwards;
+}
+
+.refresh-button.is-success .refresh-ring__fg {
+  animation: none;
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 0.35s ease;
+}
+
+.refresh-button.is-success .refresh-check {
+  opacity: 1;
+  stroke-dashoffset: 0;
+  transform: scale(1.02);
+}
+
+.refresh-button.is-loading .refresh-label,
+.refresh-button.is-success .refresh-label {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+
+.refresh-button:disabled {
+  cursor: not-allowed;
+  filter: brightness(0.95);
+}
+
+@keyframes ring-spin {
+  0% {
+    transform: rotate(-90deg);
+  }
+  100% {
+    transform: rotate(270deg);
+  }
+}
+
+@keyframes ring-dash {
+  0% {
+    stroke-dashoffset: 188;
+  }
+  50% {
+    stroke-dashoffset: 58;
+  }
+  100% {
+    stroke-dashoffset: 188;
+  }
+}
+
+@keyframes ring-settle {
+  0% {
+    transform: rotate(90deg);
+  }
+  100% {
+    transform: rotate(-90deg);
+  }
 }
 
 .card {
