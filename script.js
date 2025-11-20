@@ -89,26 +89,6 @@
     selectedRosterDate: '',
     rosterDepartments: [],
     selectedRosterDepartment: '',
-    refreshTimeout: null,
-  };
-  const state = {
-    data: [],
-    selectedDepartment: '',
-    selectedPerson: '',
-    showFutureOnly: false,
-    loading: false,
-    activeMonth: today.getMonth() + 1,
-    activeYear: today.getFullYear(),
-    sourceName: '',
-    timers: [],
-    started: false,
-    lastUpdated: null,
-    exportUrl: '',
-    rosterMap: new Map(),
-    rosterDates: [],
-    selectedRosterDate: '',
-    rosterDepartments: [],
-    selectedRosterDepartment: '',
   };
 
   const els = {
@@ -207,17 +187,6 @@
     els.rosterDateSelect?.addEventListener('change', handleRosterDateChange);
     els.rosterDepartmentSelect?.addEventListener('change', handleRosterDepartmentChange);
   }
-  function attachListeners() {
-    els.department?.addEventListener('change', handleDepartmentChange);
-    els.person?.addEventListener('change', handlePersonChange);
-    els.futureToggle?.addEventListener('change', handleFutureToggle);
-    els.refreshButtons.forEach((button) => {
-      enhanceRefreshButton(button);
-      button.addEventListener('click', () => refreshFromSheet(false));
-    });
-    els.rosterDateSelect?.addEventListener('change', handleRosterDateChange);
-    els.rosterDepartmentSelect?.addEventListener('change', handleRosterDepartmentChange);
-  }
 
   function hydratePreferences() {
     const storedFuture = window.localStorage.getItem(storageKeys.futureOnly);
@@ -235,24 +204,6 @@
     }
   }
 
-  function loadCachedDataset() {
-    const cachedData = safeParse(window.localStorage.getItem(storageKeys.data));
-    const exportUrl = getExportUrl();
-
-    const cachedSourceLink = cachedData?.meta?.sourceLink;
-    const cacheMatchesSource = exportUrl && cachedSourceLink && cachedSourceLink === exportUrl;
-
-    if (cachedData?.data?.length && cacheMatchesSource) {
-      state.data = cachedData.data;
-      if (cachedData.meta) {
-        state.activeMonth = cachedData.meta.month || state.activeMonth;
-        state.activeYear = cachedData.meta.year || state.activeYear;
-        state.sourceName = cachedData.meta.sourceName || state.sourceName;
-        state.lastUpdated = cachedData.createdAt || null;
-      }
-      buildRosterData();
-      enableSelectors();
-      updateSummary(state.data, cachedData.createdAt);
   function loadCachedDataset() {
     const cachedData = safeParse(window.localStorage.getItem(storageKeys.data));
     const exportUrl = getExportUrl();
@@ -300,31 +251,6 @@
     state.exportUrl = exportUrl;
 
     state.loading = true;
-    setRefreshState('loading');
-    setStatus(isInitial ? 'Henter vaktplan fra Google Sheets ...' : 'Oppdaterer vaktplan ...');
-
-    try {
-      state.data = [];
-      state.lastUpdated = null;
-      buildRosterData();
-      disableSelectors();
-      setStatus('Ingen lagret plan ennå. Forsøker å hente fra Google Sheets ...');
-      renderRosterControls();
-      renderRosterList();
-    }
-  }
-
-  async function refreshFromSheet(isInitial) {
-    if (state.loading) return;
-    const exportUrl = getExportUrl();
-    if (!exportUrl) {
-      setStatus('ADMIN: Oppdater SHEET_SHARE_LINK i script.js med en gyldig delingslenke.');
-      return;
-    }
-
-    state.exportUrl = exportUrl;
-
-    state.loading = true;
     setStatus(isInitial ? 'Henter vaktplan fra Google Sheets ...' : 'Oppdaterer vaktplan ...');
 
     try {
@@ -335,19 +261,6 @@
       applyFileMetadata(response);
       const buffer = await response.arrayBuffer();
       await ingestWorkbook(buffer);
-      persistData();
-      const label = formatPlanLabel();
-      setStatus(
-        `Vaktplanen er oppdatert${label ? ` (${label})` : ''}${state.sourceName ? ` – ${state.sourceName}` : ''}.`,
-      );
-      setRefreshState('success');
-    } catch (error) {
-      handleError(error);
-      setRefreshState('idle');
-    } finally {
-      state.loading = false;
-    }
-  }
       persistData();
       const label = formatPlanLabel();
       setStatus(
@@ -408,13 +321,6 @@
     if (!dataset.length) {
       throw new Error('Fant ingen vakter i arket. Kontroller at strukturen er uendret.');
     }
-    state.data = dataset;
-    state.lastUpdated = Date.now();
-    buildRosterData();
-    updateSummary(dataset, Date.now());
-    enableSelectors();
-    applySelectionFallbacks();
-    renderSelections();
     state.data = dataset;
     state.lastUpdated = Date.now();
     buildRosterData();
@@ -826,15 +732,6 @@
     state.selectedRosterDate = '';
     state.selectedRosterDepartment = '';
     if (!state.data?.length) return;
-  function buildRosterData() {
-    const previousDate = state.selectedRosterDate;
-    const previousDepartment = state.selectedRosterDepartment;
-    state.rosterMap = new Map();
-    state.rosterDates = [];
-    state.rosterDepartments = [];
-    state.selectedRosterDate = '';
-    state.selectedRosterDepartment = '';
-    if (!state.data?.length) return;
 
     const departmentSet = new Set();
     state.data.forEach((entry) => {
@@ -872,20 +769,6 @@
     }
   }
 
-    state.rosterDepartments = Array.from(departmentSet).sort((a, b) => a.localeCompare(b, 'no'));
-    state.rosterMap.forEach((list) => list.sort(compareRosterEntries));
-    state.rosterDates = Array.from(state.rosterMap.keys()).sort();
-    if (previousDepartment && state.rosterDepartments.includes(previousDepartment)) {
-      state.selectedRosterDepartment = previousDepartment;
-    }
-
-    if (previousDate && state.rosterDates.includes(previousDate)) {
-      state.selectedRosterDate = previousDate;
-    } else {
-      state.selectedRosterDate = pickDefaultRosterDate();
-    }
-  }
-
   function compareRosterEntries(a, b) {
     const timeCompare = rosterTimeValue(a).localeCompare(rosterTimeValue(b));
     if (timeCompare !== 0) return timeCompare;
@@ -902,10 +785,6 @@
     return '99:99';
   }
 
-  function getAvailableRosterDates() {
-    if (!state.rosterDates?.length) return [];
-    return state.rosterDates;
-  }
   function getAvailableRosterDates() {
     if (!state.rosterDates?.length) return [];
     const todayISO = new Date().toISOString().slice(0, 10);
@@ -931,41 +810,6 @@
 
   function getRosterDepartments() {
     return state.rosterDepartments || [];
-  }
-
-  function enhanceRefreshButton(button) {
-    if (!button || button.dataset.decorated === 'true') return;
-    const label = button.textContent?.trim() || 'Oppdater nå';
-    button.dataset.decorated = 'true';
-    button.dataset.label = label;
-    button.classList.add('refresh-button');
-    button.setAttribute('aria-live', 'polite');
-    button.innerHTML = `
-      <span class="refresh-visual" aria-hidden="true">
-        <span class="refresh-icon refresh-icon--spinner"></span>
-        <span class="refresh-icon refresh-icon--check">✔</span>
-      </span>
-      <span class="refresh-label">${label}</span>
-    `;
-  }
-
-  function setRefreshState(mode) {
-    if (!els.refreshButtons?.length) return;
-    clearTimeout(state.refreshTimeout);
-    els.refreshButtons.forEach((button) => {
-      button.classList.remove('is-loading', 'is-success');
-      button.disabled = mode === 'loading';
-      if (mode === 'loading') {
-        button.classList.add('is-loading');
-      }
-      if (mode === 'success') {
-        button.classList.add('is-success');
-      }
-    });
-
-    if (mode === 'success') {
-      state.refreshTimeout = window.setTimeout(() => setRefreshState('idle'), 2000);
-    }
   }
 
   function enhanceRefreshButton(button) {
@@ -1058,23 +902,6 @@
     );
   }
 
-  function persistData() {
-    const exportUrl = getExportUrl();
-    state.lastUpdated = Date.now();
-    window.localStorage.setItem(
-      storageKeys.data,
-      JSON.stringify({
-        createdAt: state.lastUpdated,
-        data: state.data,
-        meta: {
-          month: state.activeMonth,
-          year: state.activeYear,
-          sourceName: state.sourceName,
-          sourceLink: exportUrl,
-        },
-      }),
-    );
-  }
   function persistData() {
     const exportUrl = getExportUrl();
     state.lastUpdated = Date.now();
@@ -1193,41 +1020,6 @@
     return { month, year };
   }
 
-  function buildExportUrl(link) {
-    if (!link) return '';
-    if (link.includes('/export')) return link;
-    const match = link.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-    if (!match) return '';
-    return `https://docs.google.com/spreadsheets/d/${match[1]}/export?format=xlsx`;
-  }
-
-  function getExportUrl() {
-    if (state.exportUrl) return state.exportUrl;
-    state.exportUrl = buildExportUrl(SHEET_SHARE_LINK);
-    return state.exportUrl;
-  }
-
-  function isCacheStale() {
-    if (!state.lastUpdated) return true;
-    return Date.now() - state.lastUpdated > AUTO_REFRESH_INTERVAL;
-  }
-
-  function capitalize(text) {
-    if (!text) return '';
-    return text.charAt(0).toUpperCase() + text.slice(1);
-  }
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
-
-    if (state.loading) return;
-
-    if (isCacheStale()) {
-      refreshFromSheet(false);
-    } else if (state.data.length) {
-      renderShifts();
-    }
-  });
   function buildExportUrl(link) {
     if (!link) return '';
     if (link.includes('/export')) return link;
