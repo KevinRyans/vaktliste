@@ -8,7 +8,7 @@
    * "Vaktliste november 25.xlsx" slik at appen kan tolke datoene.
    */
   const SHEET_SHARE_LINK =
-    'https://docs.google.com/spreadsheets/d/1wS6kF6qygOIvgu-pPOGQdUCGjUyYwL2EkH9CH6xtMgU/edit?usp=sharing';
+    'https://docs.google.com/spreadsheets/d/1GmMwaTFYNuLfxmW-GpA5UpHAy-Z1-3CXVpHrjSYlwis/edit?usp=sharing';
 
   const storageKeys = {
     data: 'vaktliste:data',
@@ -83,7 +83,7 @@
     timers: [],
     started: false,
     lastUpdated: null,
-    exportUrl: '',
+    exportBaseUrl: '',
     rosterMap: new Map(),
     rosterDates: [],
     selectedRosterDate: '',
@@ -250,16 +250,23 @@
       return;
     }
 
-    state.exportUrl = exportUrl;
+    state.exportBaseUrl = exportUrl;
+    const fetchUrl = getExportUrl(true);
 
     state.loading = true;
     setRefreshState('loading');
     setStatus(isInitial ? 'Henter vaktplan fra Google Sheets ...' : 'Oppdaterer vaktplan ...');
 
     try {
-      const response = await fetch(exportUrl, { cache: 'no-cache' });
+      const response = await fetch(fetchUrl, { cache: 'no-cache' });
       if (!response.ok) {
         throw new Error('Klarte ikke å laste ned fra Google Sheets. Sjekk delingsinnstillingene.');
+      }
+      const contentType = response.headers.get('content-type') || '';
+      if (/text\/html/i.test(contentType)) {
+        throw new Error(
+          'Fikk et HTML-svar i stedet for Excel. Sjekk at delingslenken er satt til "alle med lenken kan se".',
+        );
       }
       applyFileMetadata(response);
       const buffer = await response.arrayBuffer();
@@ -1051,10 +1058,14 @@
     return `https://docs.google.com/spreadsheets/d/${match[1]}/export?format=xlsx`;
   }
 
-  function getExportUrl() {
-    if (state.exportUrl) return state.exportUrl;
-    state.exportUrl = buildExportUrl(SHEET_SHARE_LINK);
-    return state.exportUrl;
+  function getExportUrl(withCacheBust = false) {
+    if (!state.exportBaseUrl) {
+      state.exportBaseUrl = buildExportUrl(SHEET_SHARE_LINK);
+    }
+    if (!state.exportBaseUrl) return '';
+    if (!withCacheBust) return state.exportBaseUrl;
+    const separator = state.exportBaseUrl.includes('?') ? '&' : '?';
+    return `${state.exportBaseUrl}${separator}cb=${Date.now()}`;
   }
 
   function isCacheStale() {
@@ -1083,5 +1094,7 @@
     state.timers.forEach((timer) => clearInterval(timer));
   });
 })();
+
+
 
 
