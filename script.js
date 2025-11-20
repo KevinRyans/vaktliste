@@ -89,7 +89,6 @@
     selectedRosterDate: '',
     rosterDepartments: [],
     selectedRosterDepartment: '',
-    refreshTimeout: null,
   };
 
   const els = {
@@ -252,7 +251,6 @@
     state.exportUrl = exportUrl;
 
     state.loading = true;
-    setRefreshState('loading');
     setStatus(isInitial ? 'Henter vaktplan fra Google Sheets ...' : 'Oppdaterer vaktplan ...');
 
     try {
@@ -274,6 +272,8 @@
       setRefreshState('idle');
     } finally {
       state.loading = false;
+      clearTimeout(state.refreshTimeout);
+      state.refreshTimeout = window.setTimeout(() => setRefreshState('idle'), 1000);
     }
   }
 
@@ -787,7 +787,19 @@
 
   function getAvailableRosterDates() {
     if (!state.rosterDates?.length) return [];
-    return state.rosterDates;
+    const todayISO = new Date().toISOString().slice(0, 10);
+    const dates = state.rosterDates.filter((date) => !state.showFutureOnly || date >= todayISO);
+
+    if (
+      state.showFutureOnly &&
+      state.selectedRosterDate &&
+      !dates.includes(state.selectedRosterDate) &&
+      state.rosterDates.includes(state.selectedRosterDate)
+    ) {
+      dates.unshift(state.selectedRosterDate);
+    }
+
+    return Array.from(new Set(dates));
   }
 
   function pickDefaultRosterDate() {
@@ -840,6 +852,33 @@
     if (mode === 'success') {
       state.refreshTimeout = window.setTimeout(() => setRefreshState('idle'), 2200);
     }
+  }
+
+  function enhanceRefreshButton(button) {
+    if (!button || button.dataset.decorated === 'true') return;
+    const label = button.textContent?.trim() || 'Oppdater nå';
+    button.dataset.decorated = 'true';
+    button.classList.add('refresh-button');
+    button.setAttribute('aria-live', 'polite');
+    button.innerHTML = `
+      <span class="refresh-icon refresh-icon--spinner" aria-hidden="true"></span>
+      <span class="refresh-icon refresh-icon--check" aria-hidden="true">✔</span>
+      <span class="refresh-label">${label}</span>
+    `;
+  }
+
+  function setRefreshState(mode) {
+    if (!els.refreshButtons?.length) return;
+    els.refreshButtons.forEach((button) => {
+      button.classList.remove('is-loading', 'is-success');
+      button.disabled = mode === 'loading';
+      if (mode === 'loading') {
+        button.classList.add('is-loading');
+      }
+      if (mode === 'success') {
+        button.classList.add('is-success');
+      }
+    });
   }
 
   function buildWeekLabel(date) {
