@@ -82,11 +82,14 @@
     sourceName: '',
     timers: [],
     started: false,
+    lastUpdated: null,
+    exportUrl: '',
     rosterMap: new Map(),
     rosterDates: [],
     selectedRosterDate: '',
     rosterDepartments: [],
     selectedRosterDepartment: '',
+    refreshTimeout: null,
   };
 
   const els = {
@@ -178,7 +181,10 @@
     els.department?.addEventListener('change', handleDepartmentChange);
     els.person?.addEventListener('change', handlePersonChange);
     els.futureToggle?.addEventListener('change', handleFutureToggle);
-    els.refreshButtons.forEach((button) => button.addEventListener('click', () => refreshFromSheet(false)));
+    els.refreshButtons.forEach((button) => {
+      enhanceRefreshButton(button);
+      button.addEventListener('click', () => refreshFromSheet(false));
+    });
     els.rosterDateSelect?.addEventListener('change', handleRosterDateChange);
     els.rosterDepartmentSelect?.addEventListener('change', handleRosterDepartmentChange);
   }
@@ -201,12 +207,18 @@
 
   function loadCachedDataset() {
     const cachedData = safeParse(window.localStorage.getItem(storageKeys.data));
-    if (cachedData?.data?.length) {
+    const exportUrl = getExportUrl();
+
+    const cachedSourceLink = cachedData?.meta?.sourceLink;
+    const cacheMatchesSource = exportUrl && cachedSourceLink && cachedSourceLink === exportUrl;
+
+    if (cachedData?.data?.length && cacheMatchesSource) {
       state.data = cachedData.data;
       if (cachedData.meta) {
         state.activeMonth = cachedData.meta.month || state.activeMonth;
         state.activeYear = cachedData.meta.year || state.activeYear;
         state.sourceName = cachedData.meta.sourceName || state.sourceName;
+        state.lastUpdated = cachedData.createdAt || null;
       }
       buildRosterData();
       enableSelectors();
@@ -220,6 +232,7 @@
       );
     } else {
       state.data = [];
+      state.lastUpdated = null;
       buildRosterData();
       disableSelectors();
       setStatus('Ingen lagret plan ennå. Forsøker å hente fra Google Sheets ...');
@@ -230,13 +243,16 @@
 
   async function refreshFromSheet(isInitial) {
     if (state.loading) return;
-    const exportUrl = buildExportUrl(SHEET_SHARE_LINK);
+    const exportUrl = getExportUrl();
     if (!exportUrl) {
       setStatus('ADMIN: Oppdater SHEET_SHARE_LINK i script.js med en gyldig delingslenke.');
       return;
     }
 
+    state.exportUrl = exportUrl;
+
     state.loading = true;
+    setRefreshState('loading');
     setStatus(isInitial ? 'Henter vaktplan fra Google Sheets ...' : 'Oppdaterer vaktplan ...');
 
     try {
@@ -252,8 +268,10 @@
       setStatus(
         `Vaktplanen er oppdatert${label ? ` (${label})` : ''}${state.sourceName ? ` – ${state.sourceName}` : ''}.`,
       );
+      setRefreshState('success');
     } catch (error) {
       handleError(error);
+      setRefreshState('idle');
     } finally {
       state.loading = false;
     }
@@ -304,6 +322,7 @@
       throw new Error('Fant ingen vakter i arket. Kontroller at strukturen er uendret.');
     }
     state.data = dataset;
+    state.lastUpdated = Date.now();
     buildRosterData();
     updateSummary(dataset, Date.now());
     enableSelectors();
@@ -705,6 +724,8 @@
   }
 
   function buildRosterData() {
+    const previousDate = state.selectedRosterDate;
+    const previousDepartment = state.selectedRosterDepartment;
     state.rosterMap = new Map();
     state.rosterDates = [];
     state.rosterDepartments = [];
@@ -737,7 +758,15 @@
     state.rosterDepartments = Array.from(departmentSet).sort((a, b) => a.localeCompare(b, 'no'));
     state.rosterMap.forEach((list) => list.sort(compareRosterEntries));
     state.rosterDates = Array.from(state.rosterMap.keys()).sort();
-    state.selectedRosterDate = pickDefaultRosterDate();
+    if (previousDepartment && state.rosterDepartments.includes(previousDepartment)) {
+      state.selectedRosterDepartment = previousDepartment;
+    }
+
+    if (previousDate && state.rosterDates.includes(previousDate)) {
+      state.selectedRosterDate = previousDate;
+    } else {
+      state.selectedRosterDate = pickDefaultRosterDate();
+    }
   }
 
   function compareRosterEntries(a, b) {
@@ -758,8 +787,7 @@
 
   function getAvailableRosterDates() {
     if (!state.rosterDates?.length) return [];
-    const todayISO = new Date().toISOString().slice(0, 10);
-    return state.rosterDates.filter((date) => !state.showFutureOnly || date >= todayISO);
+    return state.rosterDates;
   }
 
   function pickDefaultRosterDate() {
@@ -770,6 +798,48 @@
 
   function getRosterDepartments() {
     return state.rosterDepartments || [];
+  }
+
+  function enhanceRefreshButton(button) {
+    if (!button || button.dataset.decorated === 'true') return;
+    const label = button.textContent?.trim() || 'Oppdater nå';
+    button.dataset.decorated = 'true';
+    button.dataset.label = label;
+    button.classList.add('refresh-button');
+    button.setAttribute('aria-live', 'polite');
+    button.innerHTML = `
+      <span class="refresh-visual" aria-hidden="true">
+        <span class="refresh-icon refresh-icon--spinner"></span>
+        <span class="refresh-icon refresh-icon--check">✔</span>
+      </span>
+      <span class="refresh-label">${label}</span>
+    `;
+  }
+
+  function setRefreshState(mode) {
+    if (!els.refreshButtons?.length) return;
+    clearTimeout(state.refreshTimeout);
+    els.refreshButtons.forEach((button) => {
+      button.classList.remove('is-loading', 'is-success');
+      button.disabled = mode === 'loading';
+      button.setAttribute('aria-busy', mode === 'loading' ? 'true' : 'false');
+      if (mode === 'loading') {
+        button.classList.add('is-loading');
+      }
+      if (mode === 'success') {
+        button.classList.add('is-success');
+      }
+      if (mode === 'idle') {
+        const labelEl = button.querySelector('.refresh-label');
+        if (labelEl) {
+          labelEl.textContent = button.dataset.label || 'Oppdater nå';
+        }
+      }
+    });
+
+    if (mode === 'success') {
+      state.refreshTimeout = window.setTimeout(() => setRefreshState('idle'), 2200);
+    }
   }
 
   function buildWeekLabel(date) {
@@ -836,15 +906,18 @@
   }
 
   function persistData() {
+    const exportUrl = getExportUrl();
+    state.lastUpdated = Date.now();
     window.localStorage.setItem(
       storageKeys.data,
       JSON.stringify({
-        createdAt: Date.now(),
+        createdAt: state.lastUpdated,
         data: state.data,
         meta: {
           month: state.activeMonth,
           year: state.activeYear,
           sourceName: state.sourceName,
+          sourceLink: exportUrl,
         },
       }),
     );
@@ -958,13 +1031,30 @@
     return `https://docs.google.com/spreadsheets/d/${match[1]}/export?format=xlsx`;
   }
 
+  function getExportUrl() {
+    if (state.exportUrl) return state.exportUrl;
+    state.exportUrl = buildExportUrl(SHEET_SHARE_LINK);
+    return state.exportUrl;
+  }
+
+  function isCacheStale() {
+    if (!state.lastUpdated) return true;
+    return Date.now() - state.lastUpdated > AUTO_REFRESH_INTERVAL;
+  }
+
   function capitalize(text) {
     if (!text) return '';
     return text.charAt(0).toUpperCase() + text.slice(1);
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && state.data.length && !state.loading) {
+    if (document.visibilityState !== 'visible') return;
+
+    if (state.loading) return;
+
+    if (isCacheStale()) {
+      refreshFromSheet(false);
+    } else if (state.data.length) {
       renderShifts();
     }
   });
