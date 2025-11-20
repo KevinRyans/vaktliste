@@ -89,8 +89,6 @@
     selectedRosterDate: '',
     rosterDepartments: [],
     selectedRosterDepartment: '',
-    refreshTimeout: null,
-    refreshStartedAt: 0,
   };
 
   const els = {
@@ -253,7 +251,6 @@
     state.exportUrl = exportUrl;
 
     state.loading = true;
-    setRefreshState('loading');
     setStatus(isInitial ? 'Henter vaktplan fra Google Sheets ...' : 'Oppdaterer vaktplan ...');
 
     try {
@@ -275,6 +272,8 @@
       setRefreshState('idle');
     } finally {
       state.loading = false;
+      clearTimeout(state.refreshTimeout);
+      state.refreshTimeout = window.setTimeout(() => setRefreshState('idle'), 1000);
     }
   }
 
@@ -788,7 +787,19 @@
 
   function getAvailableRosterDates() {
     if (!state.rosterDates?.length) return [];
-    return state.rosterDates;
+    const todayISO = new Date().toISOString().slice(0, 10);
+    const dates = state.rosterDates.filter((date) => !state.showFutureOnly || date >= todayISO);
+
+    if (
+      state.showFutureOnly &&
+      state.selectedRosterDate &&
+      !dates.includes(state.selectedRosterDate) &&
+      state.rosterDates.includes(state.selectedRosterDate)
+    ) {
+      dates.unshift(state.selectedRosterDate);
+    }
+
+    return Array.from(new Set(dates));
   }
 
   function pickDefaultRosterDate() {
@@ -858,6 +869,134 @@
     if (mode === 'success') {
       state.refreshTimeout = window.setTimeout(() => setRefreshState('idle'), 1400);
     }
+  }
+
+  function enhanceRefreshButton(button) {
+    if (!button || button.dataset.decorated === 'true') return;
+    const label = button.textContent?.trim() || 'Oppdater nå';
+    button.dataset.decorated = 'true';
+    button.dataset.label = label;
+    button.classList.add('refresh-button');
+    button.setAttribute('aria-live', 'polite');
+    button.innerHTML = `
+      <span class="refresh-visual" aria-hidden="true">
+        <svg class="refresh-ring" viewBox="0 0 48 48">
+          <circle class="refresh-ring__bg" cx="24" cy="24" r="20" />
+          <circle class="refresh-ring__fg" cx="24" cy="24" r="20" />
+          <polyline class="refresh-check" points="14,24 21,31 34,18" />
+        </svg>
+      </span>
+      <span class="refresh-label">${label}</span>
+    `;
+  }
+
+  function setRefreshState(mode) {
+    if (!els.refreshButtons?.length) return;
+    clearTimeout(state.refreshTimeout);
+
+    if (mode === 'loading') {
+      state.refreshStartedAt = Date.now();
+    }
+
+    if (mode === 'success') {
+      const elapsed = Date.now() - state.refreshStartedAt;
+      const minimumSpin = 1300;
+      if (elapsed < minimumSpin) {
+        state.refreshTimeout = window.setTimeout(() => setRefreshState('success'), minimumSpin - elapsed);
+        return;
+      }
+    }
+
+    els.refreshButtons.forEach((button) => {
+      button.classList.remove('is-loading', 'is-success');
+      button.disabled = mode === 'loading';
+      button.setAttribute('aria-busy', mode === 'loading' ? 'true' : 'false');
+      if (mode === 'loading') {
+        button.classList.add('is-loading');
+      }
+      if (mode === 'success') {
+        button.classList.add('is-success');
+      }
+      if (mode === 'idle') {
+        const labelEl = button.querySelector('.refresh-label');
+        if (labelEl) {
+          labelEl.textContent = button.dataset.label || 'Oppdater nå';
+        }
+      }
+    });
+
+    if (mode === 'success') {
+      state.refreshTimeout = window.setTimeout(() => setRefreshState('idle'), 1400);
+    }
+  }
+
+  function enhanceRefreshButton(button) {
+    if (!button || button.dataset.decorated === 'true') return;
+    const label = button.textContent?.trim() || 'Oppdater nå';
+    button.dataset.decorated = 'true';
+    button.dataset.label = label;
+    button.classList.add('refresh-button');
+    button.setAttribute('aria-live', 'polite');
+    button.innerHTML = `
+      <span class="refresh-visual" aria-hidden="true">
+        <span class="refresh-icon refresh-icon--spinner"></span>
+        <span class="refresh-icon refresh-icon--check">✔</span>
+      </span>
+      <span class="refresh-label">${label}</span>
+    `;
+  }
+
+  function setRefreshState(mode) {
+    if (!els.refreshButtons?.length) return;
+    clearTimeout(state.refreshTimeout);
+    els.refreshButtons.forEach((button) => {
+      button.classList.remove('is-loading', 'is-success');
+      button.disabled = mode === 'loading';
+      button.setAttribute('aria-busy', mode === 'loading' ? 'true' : 'false');
+      if (mode === 'loading') {
+        button.classList.add('is-loading');
+      }
+      if (mode === 'success') {
+        button.classList.add('is-success');
+      }
+      if (mode === 'idle') {
+        const labelEl = button.querySelector('.refresh-label');
+        if (labelEl) {
+          labelEl.textContent = button.dataset.label || 'Oppdater nå';
+        }
+      }
+    });
+
+    if (mode === 'success') {
+      state.refreshTimeout = window.setTimeout(() => setRefreshState('idle'), 2200);
+    }
+  }
+
+  function enhanceRefreshButton(button) {
+    if (!button || button.dataset.decorated === 'true') return;
+    const label = button.textContent?.trim() || 'Oppdater nå';
+    button.dataset.decorated = 'true';
+    button.classList.add('refresh-button');
+    button.setAttribute('aria-live', 'polite');
+    button.innerHTML = `
+      <span class="refresh-icon refresh-icon--spinner" aria-hidden="true"></span>
+      <span class="refresh-icon refresh-icon--check" aria-hidden="true">✔</span>
+      <span class="refresh-label">${label}</span>
+    `;
+  }
+
+  function setRefreshState(mode) {
+    if (!els.refreshButtons?.length) return;
+    els.refreshButtons.forEach((button) => {
+      button.classList.remove('is-loading', 'is-success');
+      button.disabled = mode === 'loading';
+      if (mode === 'loading') {
+        button.classList.add('is-loading');
+      }
+      if (mode === 'success') {
+        button.classList.add('is-success');
+      }
+    });
   }
 
   function buildWeekLabel(date) {
