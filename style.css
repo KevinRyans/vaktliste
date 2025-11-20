@@ -190,9 +190,9 @@ h1 {
 }
 
 .refresh-ring {
-  width: 2.2rem;
-  height: 2.2rem;
-  transform: rotate(90deg);
+  width: 2.9rem;
+  height: 2.9rem;
+  transform: rotate(-90deg);
 }
 
 .refresh-ring__bg,
@@ -277,10 +277,10 @@ h1 {
 
 @keyframes ring-spin {
   0% {
-    transform: rotate(90deg);
+    transform: rotate(-90deg);
   }
   100% {
-    transform: rotate(450deg);
+    transform: rotate(270deg);
   }
 }
 
@@ -298,10 +298,10 @@ h1 {
 
 @keyframes ring-settle {
   0% {
-    transform: rotate(450deg);
+    transform: rotate(90deg);
   }
   100% {
-    transform: rotate(90deg);
+    transform: rotate(-90deg);
   }
 }
 
@@ -521,6 +521,11 @@ button.ghost:hover {
   display: flex;
   gap: 1rem;
   align-items: center;
+}
+
+.toggle .switch {
+  flex: 0 0 auto;
+  min-width: 56px;
 }
 
 .quick-actions {

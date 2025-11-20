@@ -8,7 +8,7 @@
    * "Vaktliste november 25.xlsx" slik at appen kan tolke datoene.
    */
   const SHEET_SHARE_LINK =
-    'https://docs.google.com/spreadsheets/d/1wS6kF6qygOIvgu-pPOGQdUCGjUyYwL2EkH9CH6xtMgU/edit?usp=sharing';
+    'https://docs.google.com/spreadsheets/d/1GmMwaTFYNuLfxmW-GpA5UpHAy-Z1-3CXVpHrjSYlwis/edit?usp=sharing';
 
   const storageKeys = {
     data: 'vaktliste:data',
@@ -803,28 +803,21 @@
 
   function enhanceRefreshButton(button) {
     if (!button || button.dataset.decorated === 'true') return;
-    const existingLabel = button.querySelector('.refresh-label');
-    const label = existingLabel?.textContent?.trim() || button.textContent?.trim() || 'Oppdater nå';
+    const label = button.textContent?.trim() || 'Oppdater nå';
     button.dataset.decorated = 'true';
     button.dataset.label = label;
     button.classList.add('refresh-button');
     button.setAttribute('aria-live', 'polite');
-
-    const hasVisual = button.querySelector('.refresh-visual');
-    if (!hasVisual) {
-      button.innerHTML = `
-        <span class="refresh-visual" aria-hidden="true">
-          <svg class="refresh-ring" viewBox="0 0 70 70" focusable="false" aria-hidden="true">
-            <circle class="refresh-ring__bg" cx="35" cy="35" r="30" />
-            <circle class="refresh-ring__fg" cx="35" cy="35" r="30" />
-            <polyline class="refresh-check" points="22,36 33,47 48,22" />
-          </svg>
-        </span>
-        <span class="refresh-label">${label}</span>
-      `;
-    } else if (existingLabel) {
-      existingLabel.textContent = label;
-    }
+    button.innerHTML = `
+      <span class="refresh-visual" aria-hidden="true">
+        <svg class="refresh-ring" viewBox="0 0 70 70" focusable="false" aria-hidden="true">
+          <circle class="refresh-ring__bg" cx="35" cy="35" r="30" />
+          <circle class="refresh-ring__fg" cx="35" cy="35" r="30" />
+          <polyline class="refresh-check" points="22,36 33,47 48,22" />
+        </svg>
+      </span>
+      <span class="refresh-label">${label}</span>
+    `;
   }
 
   function setRefreshState(mode) {
@@ -1088,6 +1081,4 @@
     state.timers.forEach((timer) => clearInterval(timer));
   });
 })();
-
-
 
