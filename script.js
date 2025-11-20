@@ -89,7 +89,6 @@
     selectedRosterDate: '',
     rosterDepartments: [],
     selectedRosterDepartment: '',
-    refreshTimeout: null,
   };
 
   const els = {
@@ -252,7 +251,6 @@
     state.exportUrl = exportUrl;
 
     state.loading = true;
-    setRefreshState('loading');
     setStatus(isInitial ? 'Henter vaktplan fra Google Sheets ...' : 'Oppdaterer vaktplan ...');
 
     try {
