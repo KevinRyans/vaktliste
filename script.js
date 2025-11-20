@@ -816,6 +816,48 @@
     if (!button || button.dataset.decorated === 'true') return;
     const label = button.textContent?.trim() || 'Oppdater nå';
     button.dataset.decorated = 'true';
+    button.dataset.label = label;
+    button.classList.add('refresh-button');
+    button.setAttribute('aria-live', 'polite');
+    button.innerHTML = `
+      <span class="refresh-visual" aria-hidden="true">
+        <span class="refresh-icon refresh-icon--spinner"></span>
+        <span class="refresh-icon refresh-icon--check">✔</span>
+      </span>
+      <span class="refresh-label">${label}</span>
+    `;
+  }
+
+  function setRefreshState(mode) {
+    if (!els.refreshButtons?.length) return;
+    clearTimeout(state.refreshTimeout);
+    els.refreshButtons.forEach((button) => {
+      button.classList.remove('is-loading', 'is-success');
+      button.disabled = mode === 'loading';
+      button.setAttribute('aria-busy', mode === 'loading' ? 'true' : 'false');
+      if (mode === 'loading') {
+        button.classList.add('is-loading');
+      }
+      if (mode === 'success') {
+        button.classList.add('is-success');
+      }
+      if (mode === 'idle') {
+        const labelEl = button.querySelector('.refresh-label');
+        if (labelEl) {
+          labelEl.textContent = button.dataset.label || 'Oppdater nå';
+        }
+      }
+    });
+
+    if (mode === 'success') {
+      state.refreshTimeout = window.setTimeout(() => setRefreshState('idle'), 2200);
+    }
+  }
+
+  function enhanceRefreshButton(button) {
+    if (!button || button.dataset.decorated === 'true') return;
+    const label = button.textContent?.trim() || 'Oppdater nå';
+    button.dataset.decorated = 'true';
     button.classList.add('refresh-button');
     button.setAttribute('aria-live', 'polite');
     button.innerHTML = `
