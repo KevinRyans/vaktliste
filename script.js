@@ -180,7 +180,10 @@
     els.department?.addEventListener('change', handleDepartmentChange);
     els.person?.addEventListener('change', handlePersonChange);
     els.futureToggle?.addEventListener('change', handleFutureToggle);
-    els.refreshButtons.forEach((button) => button.addEventListener('click', () => refreshFromSheet(false)));
+    els.refreshButtons.forEach((button) => {
+      enhanceRefreshButton(button);
+      button.addEventListener('click', () => refreshFromSheet(false));
+    });
     els.rosterDateSelect?.addEventListener('change', handleRosterDateChange);
     els.rosterDepartmentSelect?.addEventListener('change', handleRosterDepartmentChange);
   }
@@ -263,10 +266,14 @@
       setStatus(
         `Vaktplanen er oppdatert${label ? ` (${label})` : ''}${state.sourceName ? ` – ${state.sourceName}` : ''}.`,
       );
+      setRefreshState('success');
     } catch (error) {
       handleError(error);
+      setRefreshState('idle');
     } finally {
       state.loading = false;
+      clearTimeout(state.refreshTimeout);
+      state.refreshTimeout = window.setTimeout(() => setRefreshState('idle'), 1000);
     }
   }
 
@@ -717,6 +724,8 @@
   }
 
   function buildRosterData() {
+    const previousDate = state.selectedRosterDate;
+    const previousDepartment = state.selectedRosterDepartment;
     state.rosterMap = new Map();
     state.rosterDates = [];
     state.rosterDepartments = [];
@@ -749,7 +758,15 @@
     state.rosterDepartments = Array.from(departmentSet).sort((a, b) => a.localeCompare(b, 'no'));
     state.rosterMap.forEach((list) => list.sort(compareRosterEntries));
     state.rosterDates = Array.from(state.rosterMap.keys()).sort();
-    state.selectedRosterDate = pickDefaultRosterDate();
+    if (previousDepartment && state.rosterDepartments.includes(previousDepartment)) {
+      state.selectedRosterDepartment = previousDepartment;
+    }
+
+    if (previousDate && state.rosterDates.includes(previousDate)) {
+      state.selectedRosterDate = previousDate;
+    } else {
+      state.selectedRosterDate = pickDefaultRosterDate();
+    }
   }
 
   function compareRosterEntries(a, b) {
@@ -771,7 +788,18 @@
   function getAvailableRosterDates() {
     if (!state.rosterDates?.length) return [];
     const todayISO = new Date().toISOString().slice(0, 10);
-    return state.rosterDates.filter((date) => !state.showFutureOnly || date >= todayISO);
+    const dates = state.rosterDates.filter((date) => !state.showFutureOnly || date >= todayISO);
+
+    if (
+      state.showFutureOnly &&
+      state.selectedRosterDate &&
+      !dates.includes(state.selectedRosterDate) &&
+      state.rosterDates.includes(state.selectedRosterDate)
+    ) {
+      dates.unshift(state.selectedRosterDate);
+    }
+
+    return Array.from(new Set(dates));
   }
 
   function pickDefaultRosterDate() {
@@ -782,6 +810,33 @@
 
   function getRosterDepartments() {
     return state.rosterDepartments || [];
+  }
+
+  function enhanceRefreshButton(button) {
+    if (!button || button.dataset.decorated === 'true') return;
+    const label = button.textContent?.trim() || 'Oppdater nå';
+    button.dataset.decorated = 'true';
+    button.classList.add('refresh-button');
+    button.setAttribute('aria-live', 'polite');
+    button.innerHTML = `
+      <span class="refresh-icon refresh-icon--spinner" aria-hidden="true"></span>
+      <span class="refresh-icon refresh-icon--check" aria-hidden="true">✔</span>
+      <span class="refresh-label">${label}</span>
+    `;
+  }
+
+  function setRefreshState(mode) {
+    if (!els.refreshButtons?.length) return;
+    els.refreshButtons.forEach((button) => {
+      button.classList.remove('is-loading', 'is-success');
+      button.disabled = mode === 'loading';
+      if (mode === 'loading') {
+        button.classList.add('is-loading');
+      }
+      if (mode === 'success') {
+        button.classList.add('is-success');
+      }
+    });
   }
 
   function buildWeekLabel(date) {
