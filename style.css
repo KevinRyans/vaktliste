@@ -190,9 +190,13 @@ h1 {
 }
 
 .refresh-ring {
-  width: 2.9rem;
-  height: 2.9rem;
+  width: 2.4rem;
+  height: 2.4rem;
+}
+
+.refresh-ring__spinner {
   transform: rotate(-90deg);
+  transform-origin: center;
 }
 
 .refresh-ring__bg,
@@ -240,7 +244,7 @@ h1 {
 }
 
 
-.refresh-button.is-loading .refresh-ring {
+.refresh-button.is-loading .refresh-ring__spinner {
   animation: ring-spin 0.32s linear infinite;
 }
 
@@ -248,7 +252,7 @@ h1 {
   animation: ring-dash 0.9s ease-in-out infinite;
 }
 
-.refresh-button.is-success .refresh-ring {
+.refresh-button.is-success .refresh-ring__spinner {
   animation: ring-settle 0.45s ease forwards;
 }
 
