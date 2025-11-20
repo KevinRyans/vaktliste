@@ -184,7 +184,9 @@
     els.futureToggle?.addEventListener('change', handleFutureToggle);
     els.refreshButtons.forEach((button) => {
       enhanceRefreshButton(button);
-      button.addEventListener('click', () => refreshFromSheet(false));
+      button.addEventListener('click', () =>
+        refreshFromSheet(false, { forceCacheBust: true, resetLocal: true }),
+      );
     });
     els.rosterDateSelect?.addEventListener('change', handleRosterDateChange);
     els.rosterDepartmentSelect?.addEventListener('change', handleRosterDepartmentChange);
@@ -242,7 +244,8 @@
     }
   }
 
-  async function refreshFromSheet(isInitial) {
+  async function refreshFromSheet(isInitial, options = {}) {
+    const { forceCacheBust = false, resetLocal = false } = options;
     if (state.loading) return;
     const exportUrl = getExportUrl();
     if (!exportUrl) {
@@ -252,6 +255,9 @@
 
     state.exportBaseUrl = exportUrl;
     const fetchUrl = getExportUrl(true);
+    if (resetLocal) {
+      clearLocalCacheAndSelection();
+    }
 
     state.loading = true;
     setRefreshState('loading');
@@ -300,7 +306,7 @@
   function scheduleAutoRefresh() {
     state.timers.forEach((timer) => clearInterval(timer));
     state.timers = [];
-    const timerId = setInterval(() => refreshFromSheet(false), AUTO_REFRESH_INTERVAL);
+    const timerId = setInterval(() => refreshFromSheet(false, { forceCacheBust: true }), AUTO_REFRESH_INTERVAL);
     state.timers.push(timerId);
   }
 
@@ -1027,6 +1033,26 @@
     }
   }
 
+  function clearLocalCacheAndSelection() {
+    window.localStorage.removeItem(storageKeys.data);
+    window.localStorage.removeItem(storageKeys.selection);
+    state.data = [];
+    state.selectedDepartment = '';
+    state.selectedPerson = '';
+    state.lastUpdated = null;
+    buildRosterData();
+    disableSelectors();
+    if (els.shiftList) {
+      els.shiftList.classList.add('empty');
+      els.shiftList.innerHTML = '<p>Henter fersk plan ...</p>';
+    }
+    if (els.info) {
+      els.info.textContent = 'Henter fersk plan �?" vennligst vent.';
+    }
+    renderRosterControls();
+    renderRosterList();
+  }
+
   function purgeCachedDatasetOnFailure() {
     window.localStorage.removeItem(storageKeys.data);
     state.data = [];
@@ -1124,7 +1150,7 @@
     if (state.loading) return;
 
     if (isCacheStale()) {
-      refreshFromSheet(false);
+      refreshFromSheet(false, { forceCacheBust: true });
     } else if (state.data.length) {
       renderShifts();
     }
@@ -1134,7 +1160,6 @@
     state.timers.forEach((timer) => clearInterval(timer));
   });
 })();
-
 
 
 
