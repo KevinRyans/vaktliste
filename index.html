@@ -40,7 +40,16 @@
         <p class="tip">
           Oppdateres automatisk hvert 30. minutt. Hvis planen nylig er endret, trykk “Oppdater nå”.
         </p>
-        <button type="button" data-role="refresh" class="refresh-top">Oppdater nå</button>
+        <button type="button" data-role="refresh" class="refresh-top refresh-button">
+          <span class="refresh-visual" aria-hidden="true">
+            <svg class="refresh-ring" viewBox="0 0 70 70" focusable="false" aria-hidden="true">
+              <circle class="refresh-ring__bg" cx="35" cy="35" r="30" />
+              <circle class="refresh-ring__fg" cx="35" cy="35" r="30" />
+              <polyline class="refresh-check" points="22,36 33,47 48,22" />
+            </svg>
+          </span>
+          <span class="refresh-label">Oppdater nå</span>
+        </button>
       </div>
     </header>
 
