@@ -8,7 +8,7 @@
    * "Vaktliste november 25.xlsx" slik at appen kan tolke datoene.
    */
   const SHEET_SHARE_LINK =
-    'https://docs.google.com/spreadsheets/d/1wS6kF6qygOIvgu-pPOGQdUCGjUyYwL2EkH9CH6xtMgU/edit?usp=sharing';
+    'https://docs.google.com/spreadsheets/d/1V1irD06qK8Cv1_XA6_qHTJYKVG_eH9ySEmgiGl6UyVE/edit?usp=sharing';
 
   const storageKeys = {
     data: 'vaktliste:data',
