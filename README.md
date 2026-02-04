@@ -32,3 +32,6 @@ En enkel webapp som henter en vaktplan direkte fra et Google-regneark og gjør d
 
 ## Lisens
 Dette prosjektet er åpen kildekode; bruk og modifiser fritt etter behov.
+
+## Illustrasjon
+<img width="1443" height="1261" alt="image" src="https://github.com/user-attachments/assets/19cd7dba-f024-45d7-ba30-802759246cf7" />
