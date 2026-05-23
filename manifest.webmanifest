@@ -1,0 +1,19 @@
+{
+  "name": "Vaktliste – Quality Hotel Tønsberg",
+  "short_name": "Vaktliste",
+  "description": "Lettlest vaktliste for restauranten på Quality Hotel Tønsberg.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#10141a",
+  "theme_color": "#10141a",
+  "lang": "no",
+  "icons": [
+    {
+      "src": "https://i.imgur.com/5EhW27H.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

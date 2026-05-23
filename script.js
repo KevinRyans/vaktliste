@@ -1,78 +1,76 @@
 'use strict';
 
+/* =====================================================================
+   Vaktliste – Quality Hotel Tønsberg
+
+   Henter vaktlisten direkte fra Google Sheets via Google-pålogging.
+   Tilgang styres av delingen på selve arket: får brukeren lese arket
+   med sin egen Google-konto, slipper hen inn. Ingen egen kodeliste.
+
+   ADMIN: fyll inn CONFIG under. Se README for steg-for-steg.
+   ===================================================================== */
+
 (() => {
-  const ACCESS_CODES = ['3116', '120701'];
-  const ACCESS_KEY = 'vaktliste:accessGranted';
-  /**
-   * Admin: oppdater lenken under hver måned. Gi filen et navn som
-   * "Vaktliste november 25.xlsx" slik at appen kan tolke datoene.
-   */
-  const SHEET_SHARE_LINK =
-    'https://docs.google.com/spreadsheets/d/1V1irD06qK8Cv1_XA6_qHTJYKVG_eH9ySEmgiGl6UyVE/edit?usp=sharing';
+  // ===================================================================
+  // ADMIN-KONFIGURASJON
+  // ===================================================================
+  const CONFIG = {
+    // OAuth Client ID fra Google Cloud (type: Web application).
+    // Eksempel: '1234567890-abcdefg.apps.googleusercontent.com'
+    GOOGLE_CLIENT_ID: '1087119477001-la8tomucms7a5khvrd4pn7nb46jjpfap.apps.googleusercontent.com',
+
+    // ID-en til Google-arket. Står i URL-en mellom /d/ og /edit.
+    SPREADSHEET_ID: '1DG_437aHLnDJb7q22J9Bmp_31UoAx4-4yeMXoLvYlHw',
+
+    // Hvor ofte appen sjekker arket for endringer (millisekunder).
+    POLL_INTERVAL: 30 * 1000,
+
+    // Valgfritt: URL til Quality-logoen (PNG/SVG). Tom = tekst-logo.
+    LOGO_URL: '',
+  };
+
+  const SCOPES = 'openid email profile https://www.googleapis.com/auth/spreadsheets.readonly';
+  const SHEETS_BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
+  const USERINFO_URL = 'https://www.googleapis.com/oauth2/v3/userinfo';
 
   const storageKeys = {
+    user: 'vaktliste:user',
     data: 'vaktliste:data',
     selection: 'vaktliste:selection',
     futureOnly: 'vaktliste:showFutureOnly',
   };
 
+  // ===================================================================
+  // Konstantar for dato-/tidstolking
+  // ===================================================================
   const MONTH_KEYWORDS = {
-    januar: 1,
-    jan: 1,
-    january: 1,
-    feb: 2,
-    februar: 2,
-    february: 2,
-    mar: 3,
-    mars: 3,
-    march: 3,
-    apr: 4,
-    april: 4,
-    mai: 5,
-    may: 5,
-    jun: 6,
-    juni: 6,
-    june: 6,
-    jul: 7,
-    juli: 7,
-    july: 7,
-    aug: 8,
-    august: 8,
-    sep: 9,
-    sept: 9,
-    september: 9,
-    okt: 10,
-    oktober: 10,
-    oct: 10,
-    october: 10,
-    nov: 11,
-    november: 11,
-    dec: 12,
-    desember: 12,
-    december: 12,
+    januar: 1, jan: 1, january: 1,
+    feb: 2, februar: 2, february: 2,
+    mar: 3, mars: 3, march: 3,
+    apr: 4, april: 4,
+    mai: 5, may: 5,
+    jun: 6, juni: 6, june: 6,
+    jul: 7, juli: 7, july: 7,
+    aug: 8, august: 8,
+    sep: 9, sept: 9, september: 9,
+    okt: 10, oktober: 10, oct: 10, october: 10,
+    nov: 11, november: 11,
+    des: 12, dec: 12, desember: 12, december: 12,
   };
 
   const MONTH_LABELS = [
-    '',
-    'januar',
-    'februar',
-    'mars',
-    'april',
-    'mai',
-    'juni',
-    'juli',
-    'august',
-    'september',
-    'oktober',
-    'november',
-    'desember',
+    '', 'januar', 'februar', 'mars', 'april', 'mai', 'juni',
+    'juli', 'august', 'september', 'oktober', 'november', 'desember',
   ];
 
   const today = new Date();
-  const AUTO_REFRESH_INTERVAL = 30 * 60 * 1000; // 30 minutes
 
+  // ===================================================================
+  // App-tilstand
+  // ===================================================================
   const state = {
     data: [],
+    dataHash: '',
     selectedDepartment: '',
     selectedPerson: '',
     showFutureOnly: false,
@@ -80,127 +78,111 @@
     activeMonth: today.getMonth() + 1,
     activeYear: today.getFullYear(),
     sourceName: '',
-    timers: [],
-    started: false,
     lastUpdated: null,
-    exportBaseUrl: '',
-    rosterMap: new Map(),
-    rosterDates: [],
-    selectedRosterDate: '',
-    rosterDepartments: [],
-    selectedRosterDepartment: '',
+    user: null,
+    pollTimer: null,
     refreshTimeout: null,
     refreshStartedAt: 0,
+    // Roster ("hvem er på jobb")
+    rosterMap: new Map(),
+    rosterDates: [],
+    rosterDepartments: [],
+    selectedRosterDate: '',
+    selectedRosterDepartment: '',
   };
 
+  // Google-token
+  let tokenClient = null;
+  let accessToken = '';
+  let tokenExpiry = 0;
+  let pendingToken = null;
+
   const els = {
-    gate: document.getElementById('accessGate'),
-    accessInput: document.getElementById('accessCode'),
-    accessButton: document.getElementById('accessEnter'),
-    accessError: document.getElementById('accessError'),
+    authScreen: document.getElementById('authScreen'),
+    deniedEmail: document.getElementById('deniedEmail'),
+    authErrorMessage: document.getElementById('authErrorMessage'),
+    signInButton: document.getElementById('signInButton'),
+    retryButton: document.getElementById('retryButton'),
+    switchAccountButton: document.getElementById('switchAccountButton'),
+    errorRetryButton: document.getElementById('errorRetryButton'),
+    app: document.querySelector('.app'),
+    statusBar: document.getElementById('statusBar'),
+    statusText: document.querySelector('#statusBar .statusbar__text'),
+    refreshButtons: Array.from(document.querySelectorAll('[data-role="refresh"]')),
+    userButton: document.getElementById('userButton'),
+    userPopover: document.getElementById('userPopover'),
+    userAvatar: document.getElementById('userAvatar'),
+    userInitial: document.getElementById('userInitial'),
+    userName: document.getElementById('userName'),
+    userEmail: document.getElementById('userEmail'),
+    signOutButton: document.getElementById('signOutButton'),
     department: document.getElementById('departmentSelect'),
     person: document.getElementById('personSelect'),
-    info: document.getElementById('selectionInfo'),
     futureToggle: document.getElementById('futureToggle'),
+    info: document.getElementById('selectionInfo'),
     shiftList: document.getElementById('shiftList'),
-    refreshButtons: Array.from(document.querySelectorAll('[data-role="refresh"]')),
-    rosterDateSelect: document.getElementById('rosterDateSelect'),
     rosterDepartmentSelect: document.getElementById('rosterDepartmentSelect'),
+    rosterDateSelect: document.getElementById('rosterDateSelect'),
     rosterList: document.getElementById('rosterList'),
+    brandLogos: Array.from(document.querySelectorAll('[data-brand-logo]')),
   };
 
   const dateFormatter = new Intl.DateTimeFormat('no-NO', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   });
   const dayRangeFormatter = new Intl.DateTimeFormat('no-NO', {
-    day: 'numeric',
-    month: 'short',
+    day: 'numeric', month: 'short',
   });
 
-  setupAccessGate();
+  boot();
 
-  function setupAccessGate() {
-    if (!els.gate) {
-      startApp();
+  // ===================================================================
+  // Oppstart
+  // ===================================================================
+  function boot() {
+    applyBranding();
+    hydratePreferences();
+    wireUi();
+
+    if (!isConfigured()) {
+      setAuthState('config');
       return;
     }
 
-    const handleSubmit = () => {
-      const code = els.accessInput?.value.trim();
-      if (isValidCode(code)) {
-        window.localStorage.setItem(ACCESS_KEY, 'true');
-        els.accessError?.classList.add('hidden');
-        els.gate?.classList.add('hidden');
-        startApp();
-      } else {
-        els.accessError?.classList.remove('hidden');
-      }
-    };
+    const storedUser = safeParse(window.localStorage.getItem(storageKeys.user));
+    if (storedUser?.email) state.user = storedUser;
 
-    els.accessButton?.addEventListener('click', handleSubmit);
-    els.accessInput?.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        handleSubmit();
-      }
+    setAuthState('loading');
+    initGoogle()
+      .then(() => {
+        if (state.user) {
+          attemptSilentSignIn();
+        } else {
+          setAuthState('signin');
+        }
+      })
+      .catch(() => showAuthError('Klarte ikke å laste Google-innlogging. Sjekk nettet og prøv igjen.'));
+  }
+
+  function isConfigured() {
+    const id = CONFIG.GOOGLE_CLIENT_ID || '';
+    return id.endsWith('.apps.googleusercontent.com') && !id.startsWith('DIN_');
+  }
+
+  function applyBranding() {
+    if (!CONFIG.LOGO_URL) return;
+    els.brandLogos.forEach((node) => {
+      node.style.backgroundImage = `url("${CONFIG.LOGO_URL}")`;
+      node.classList.add('has-logo');
     });
-    els.accessInput?.addEventListener('input', () => {
-      els.accessError?.classList.add('hidden');
-    });
-
-    if (window.localStorage.getItem(ACCESS_KEY) === 'true') {
-      els.gate?.classList.add('hidden');
-      startApp();
-    } else {
-      els.gate?.classList.remove('hidden');
-      queueMicrotask(() => els.accessInput?.focus());
-    }
-  }
-
-  function startApp() {
-    if (state.started) return;
-    state.started = true;
-    init();
-  }
-
-  function isValidCode(code) {
-    if (!code) return false;
-    return ACCESS_CODES.some((token) => token.toLowerCase() === code.toLowerCase());
-  }
-
-  function init() {
-    attachListeners();
-    hydratePreferences();
-    loadCachedDataset();
-    refreshFromSheet(true);
-    scheduleAutoRefresh();
-  }
-
-  function attachListeners() {
-    els.department?.addEventListener('change', handleDepartmentChange);
-    els.person?.addEventListener('change', handlePersonChange);
-    els.futureToggle?.addEventListener('change', handleFutureToggle);
-    els.refreshButtons.forEach((button) => {
-      enhanceRefreshButton(button);
-      button.addEventListener('click', () =>
-        refreshFromSheet(false, { forceCacheBust: true, resetLocal: true }),
-      );
-    });
-    els.rosterDateSelect?.addEventListener('change', handleRosterDateChange);
-    els.rosterDepartmentSelect?.addEventListener('change', handleRosterDepartmentChange);
   }
 
   function hydratePreferences() {
     const storedFuture = window.localStorage.getItem(storageKeys.futureOnly);
     if (storedFuture !== null) {
       state.showFutureOnly = storedFuture === 'true';
-      if (els.futureToggle) {
-        els.futureToggle.checked = state.showFutureOnly;
-      }
+      if (els.futureToggle) els.futureToggle.checked = state.showFutureOnly;
     }
-
     const storedSelection = safeParse(window.localStorage.getItem(storageKeys.selection));
     if (storedSelection) {
       state.selectedDepartment = storedSelection.department || '';
@@ -208,163 +190,384 @@
     }
   }
 
-  function loadCachedDataset() {
-    const cachedData = safeParse(window.localStorage.getItem(storageKeys.data));
-    const exportUrl = getExportUrl();
+  function wireUi() {
+    els.signInButton?.addEventListener('click', () => signIn());
+    els.switchAccountButton?.addEventListener('click', () => signIn('select_account', { allowSilent: false }));
+    els.retryButton?.addEventListener('click', () => retryAfterDenied());
+    els.errorRetryButton?.addEventListener('click', () => boot());
 
-    const cachedSourceLink = cachedData?.meta?.sourceLink;
-    const cacheMatchesSource = exportUrl && cachedSourceLink && cachedSourceLink === exportUrl;
+    els.department?.addEventListener('change', handleDepartmentChange);
+    els.person?.addEventListener('change', handlePersonChange);
+    els.futureToggle?.addEventListener('change', handleFutureToggle);
+    els.rosterDateSelect?.addEventListener('change', handleRosterDateChange);
+    els.rosterDepartmentSelect?.addEventListener('change', handleRosterDepartmentChange);
 
-    if (cachedData?.data?.length && cacheMatchesSource) {
-      state.data = cachedData.data;
-      if (cachedData.meta) {
-        state.activeMonth = cachedData.meta.month || state.activeMonth;
-        state.activeYear = cachedData.meta.year || state.activeYear;
-        state.sourceName = cachedData.meta.sourceName || state.sourceName;
-        state.lastUpdated = cachedData.createdAt || null;
+    els.refreshButtons.forEach((button) =>
+      button.addEventListener('click', () => loadSchedule({ force: true })),
+    );
+
+    els.userButton?.addEventListener('click', toggleUserMenu);
+    els.signOutButton?.addEventListener('click', signOut);
+    document.addEventListener('click', (event) => {
+      if (!els.userPopover || els.userPopover.hidden) return;
+      if (els.userButton?.contains(event.target) || els.userPopover.contains(event.target)) return;
+      closeUserMenu();
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return;
+      if (state.user && !els.app.hidden) loadSchedule({ silent: true });
+    });
+    window.addEventListener('beforeunload', stopPolling);
+  }
+
+  // ===================================================================
+  // Google Identity Services
+  // ===================================================================
+  function initGoogle() {
+    return new Promise((resolve, reject) => {
+      const start = Date.now();
+      (function waitForGis() {
+        if (window.google?.accounts?.oauth2) {
+          tokenClient = window.google.accounts.oauth2.initTokenClient({
+            client_id: CONFIG.GOOGLE_CLIENT_ID,
+            scope: SCOPES,
+            callback: handleTokenResponse,
+            error_callback: handleTokenError,
+          });
+          resolve();
+        } else if (Date.now() - start > 10000) {
+          reject(new Error('Google-biblioteket ble ikke lastet.'));
+        } else {
+          setTimeout(waitForGis, 80);
+        }
+      })();
+    });
+  }
+
+  // Be om et access-token. prompt = '' gir stille fornying uten popup.
+  function requestToken(prompt) {
+    return new Promise((resolve, reject) => {
+      if (!tokenClient) {
+        reject(new Error('Innlogging ikke klar.'));
+        return;
       }
-      buildRosterData();
-      enableSelectors();
-      updateSummary(state.data, cachedData.createdAt);
-      applySelectionFallbacks();
-      renderSelections();
-      setStatus(
-        cachedData.createdAt
-          ? `Viser lagret plan fra ${formatTimestamp(cachedData.createdAt)}. Trykk "Oppdater nå" for ny versjon.`
-          : 'Viser lagret plan. Trykk "Oppdater nå" for å hente siste versjon.',
-      );
-    } else {
-      state.data = [];
-      state.lastUpdated = null;
-      buildRosterData();
-      disableSelectors();
-      setStatus('Ingen lagret plan ennå. Forsøker å hente fra Google Sheets ...');
-      renderRosterControls();
-      renderRosterList();
+      pendingToken = { resolve, reject };
+      try {
+        tokenClient.requestAccessToken({ prompt });
+      } catch (error) {
+        pendingToken = null;
+        reject(error);
+      }
+    });
+  }
+
+  function handleTokenResponse(response) {
+    const pending = pendingToken;
+    pendingToken = null;
+    if (!pending) return;
+    if (response?.error) {
+      pending.reject(response);
+      return;
+    }
+    accessToken = response.access_token;
+    tokenExpiry = Date.now() + (Number(response.expires_in) || 3600) * 1000;
+    pending.resolve(response);
+  }
+
+  function handleTokenError(error) {
+    const pending = pendingToken;
+    pendingToken = null;
+    if (pending) pending.reject(error);
+  }
+
+  async function getValidToken() {
+    if (accessToken && Date.now() < tokenExpiry - 60000) return accessToken;
+    await requestToken(''); // stille fornying
+    return accessToken;
+  }
+
+  async function signIn(prompt = 'consent', { allowSilent = true } = {}) {
+    setAuthState('loading');
+    closeUserMenu();
+    try {
+      // Prøv stille først (returnerende bruker), ellers vis Google-dialog.
+      // Ved «bytt konto» hopper vi over det stille forsøket så brukeren
+      // faktisk får velge en annen konto.
+      if (allowSilent) {
+        try {
+          await requestToken('');
+        } catch (_) {
+          await requestToken(prompt);
+        }
+      } else {
+        accessToken = '';
+        await requestToken(prompt);
+      }
+      await onAuthenticated();
+    } catch (error) {
+      console.warn('Innlogging avbrutt', error);
+      setAuthState('signin');
     }
   }
 
-  async function refreshFromSheet(isInitial, options = {}) {
-    const { forceCacheBust = false, resetLocal = false } = options;
-    if (state.loading) return;
-    const exportUrl = getExportUrl();
-    if (!exportUrl) {
-      setStatus('ADMIN: Oppdater SHEET_SHARE_LINK i script.js med en gyldig delingslenke.');
-      return;
+  async function attemptSilentSignIn() {
+    setAuthState('loading');
+    try {
+      await getValidToken();
+      await onAuthenticated({ fresh: false });
+    } catch (error) {
+      setAuthState('signin');
     }
+  }
 
-    state.exportBaseUrl = exportUrl;
-    const fetchUrl = getExportUrl(true);
-    if (resetLocal) {
-      clearLocalCacheAndSelection();
+  async function onAuthenticated() {
+    await fetchUserInfo();
+    renderUser();
+
+    // Vis lagret plan umiddelbart for rask oppstart, oppdater i bakgrunnen.
+    const hadCache = loadCachedDataset();
+    if (hadCache) revealApp();
+
+    const ok = await loadSchedule({ initial: !hadCache });
+    if (ok) {
+      revealApp();
+      startPolling();
+    } else if (hadCache) {
+      // Hadde cache, men nyeste forsøk feilet (f.eks. tilgang trukket).
+      stopPolling();
     }
+  }
 
+  async function fetchUserInfo() {
+    const token = await getValidToken();
+    try {
+      const res = await fetch(USERINFO_URL, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const info = await res.json();
+        state.user = {
+          email: info.email || state.user?.email || '',
+          name: info.name || info.given_name || '',
+          picture: info.picture || '',
+        };
+        window.localStorage.setItem(storageKeys.user, JSON.stringify(state.user));
+      }
+    } catch (error) {
+      console.warn('Klarte ikke å hente brukerinfo', error);
+    }
+  }
+
+  function retryAfterDenied() {
+    setAuthState('loading');
+    onAuthenticated().catch(() => setAuthState('signin'));
+  }
+
+  function signOut() {
+    closeUserMenu();
+    stopPolling();
+    if (accessToken && window.google?.accounts?.oauth2) {
+      try { window.google.accounts.oauth2.revoke(accessToken, () => {}); } catch (_) { /* noop */ }
+    }
+    accessToken = '';
+    tokenExpiry = 0;
+    state.user = null;
+    state.data = [];
+    state.dataHash = '';
+    window.localStorage.removeItem(storageKeys.user);
+    window.localStorage.removeItem(storageKeys.data);
+    els.app.hidden = true;
+    setAuthState('signin');
+  }
+
+  function requireSignIn() {
+    stopPolling();
+    els.app.hidden = true;
+    setAuthState('signin');
+  }
+
+  function handleNoAccess() {
+    stopPolling();
+    els.app.hidden = true;
+    if (els.deniedEmail) els.deniedEmail.textContent = state.user?.email || 'kontoen din';
+    setAuthState('denied');
+  }
+
+  // ===================================================================
+  // Tilstand for auth-skjerm
+  // ===================================================================
+  function setAuthState(name) {
+    if (!els.authScreen) return;
+    els.authScreen.hidden = false;
+    els.authScreen.dataset.state = name;
+  }
+
+  function showAuthError(message) {
+    if (els.authErrorMessage) els.authErrorMessage.textContent = message;
+    setAuthState('error');
+  }
+
+  function revealApp() {
+    if (els.authScreen) els.authScreen.hidden = true;
+    if (els.app) els.app.hidden = false;
+  }
+
+  // ===================================================================
+  // Henting fra Google Sheets
+  // ===================================================================
+  async function sheetsApi(path) {
+    const token = await getValidToken();
+    let res = await fetch(`${SHEETS_BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (res.status === 401) {
+      accessToken = ''; // tving fornying
+      const fresh = await getValidToken();
+      res = await fetch(`${SHEETS_BASE}${path}`, { headers: { Authorization: `Bearer ${fresh}` } });
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      const error = new Error(body?.error?.message || `HTTP ${res.status}`);
+      error.status = res.status;
+      throw error;
+    }
+    return res.json();
+  }
+
+  async function fetchSchedule() {
+    const meta = await sheetsApi(
+      `/${CONFIG.SPREADSHEET_ID}?fields=properties.title,sheets(properties(title,hidden,sheetType))`,
+    );
+    const title = meta.properties?.title || '';
+    applyTitleMetadata(title);
+
+    const tabs = (meta.sheets || [])
+      .map((sheet) => sheet.properties)
+      .filter((p) => p && !p.hidden && p.sheetType !== 'OBJECT')
+      .map((p) => p.title);
+
+    if (!tabs.length) return { title, sheets: [] };
+
+    const ranges = tabs
+      .map((t) => `ranges=${encodeURIComponent(`'${t.replace(/'/g, "''")}'`)}`)
+      .join('&');
+    const values = await sheetsApi(
+      `/${CONFIG.SPREADSHEET_ID}/values:batchGet?${ranges}&majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE`,
+    );
+
+    const sheets = (values.valueRanges || []).map((vr, index) => ({
+      title: tabs[index],
+      matrix: vr.values || [],
+    }));
+    return { title, sheets };
+  }
+
+  async function loadSchedule({ initial = false, silent = false, force = false } = {}) {
+    if (state.loading) return false;
     state.loading = true;
-    setRefreshState('loading');
-    setStatus(isInitial ? 'Henter vaktplan fra Google Sheets ...' : 'Oppdaterer vaktplan ...');
+    if (!silent) setRefreshState('loading');
+    setStatus('loading', initial ? 'Henter vaktliste …' : 'Sjekker for endringer …');
 
     try {
-      const response = await fetch(fetchUrl, {
-        cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache, no-store, max-age=0, must-revalidate',
-          Pragma: 'no-cache',
-        },
-      });
-      if (!response.ok) {
-        throw new Error('Klarte ikke å laste ned fra Google Sheets. Sjekk delingsinnstillingene.');
+      const result = await fetchSchedule();
+      const dataset = extractSchedule(result.sheets);
+      if (!dataset.length) {
+        throw new Error('Fant ingen vakter i arket. Kontroller at strukturen er uendret.');
       }
-      const contentType = response.headers.get('content-type') || '';
-      if (/text\/html/i.test(contentType)) {
-        throw new Error(
-          'Fikk et HTML-svar i stedet for Excel. Sjekk at delingslenken er satt til "alle med lenken kan se".',
-        );
+
+      const hash = quickHash(JSON.stringify(dataset));
+      const changed = force || hash !== state.dataHash;
+      state.dataHash = hash;
+      state.data = dataset;
+      state.lastUpdated = Date.now();
+
+      if (changed) {
+        buildRosterData();
+        enableSelectors();
+        applySelectionFallbacks();
+        renderSelections();
+        persistData();
       }
-      applyFileMetadata(response);
-      const buffer = await response.arrayBuffer();
-      if (looksLikeHtml(buffer)) {
-        throw new Error(
-          'Fikk HTML-innhold i stedet for Excel. Kontroller delingsrettigheter og prøv igjen.',
-        );
-      }
-      await ingestWorkbook(buffer);
-      persistData();
-      const label = formatPlanLabel();
-      setStatus(
-        `Vaktplanen er oppdatert${label ? ` (${label})` : ''}${state.sourceName ? ` – ${state.sourceName}` : ''}.`,
-      );
-      setRefreshState('success');
+
+      setStatus('live', `Oppdatert ${formatClock(state.lastUpdated)}${planSuffix()}`);
+      if (!silent) setRefreshState('success');
+      return true;
     } catch (error) {
-      handleError(error);
-      purgeCachedDatasetOnFailure();
-      setRefreshState('idle');
+      if (error.status === 403) { handleNoAccess(); return false; }
+      if (error.status === 401) { requireSignIn(); return false; }
+      console.error(error);
+      if (initial && !state.data.length) {
+        showAuthError(error.message || 'Kunne ikke hente vaktlisten.');
+      } else {
+        setStatus('error', 'Kunne ikke oppdatere. Prøver igjen automatisk.');
+      }
+      if (!silent) setRefreshState('idle');
+      return false;
     } finally {
       state.loading = false;
     }
   }
 
-  function scheduleAutoRefresh() {
-    state.timers.forEach((timer) => clearInterval(timer));
-    state.timers = [];
-    const timerId = setInterval(() => refreshFromSheet(false, { forceCacheBust: true }), AUTO_REFRESH_INTERVAL);
-    state.timers.push(timerId);
+  function startPolling() {
+    stopPolling();
+    state.pollTimer = window.setInterval(() => {
+      if (document.hidden || state.loading) return;
+      loadSchedule({ silent: true });
+    }, CONFIG.POLL_INTERVAL);
   }
 
-  function applyFileMetadata(response) {
-    const disposition =
-      response.headers.get('Content-Disposition') || response.headers.get('content-disposition');
-    if (!disposition) return;
-
-    let fileName = '';
-    const utfMatch = disposition.match(/filename\*=(?:UTF-8'')?([^;]+)/i);
-    const plainMatch = disposition.match(/filename=\"?([^\";]+)\"?/i);
-    if (utfMatch) {
-      try {
-        fileName = decodeURIComponent(utfMatch[1]);
-      } catch (error) {
-        fileName = utfMatch[1];
-      }
-    } else if (plainMatch) {
-      fileName = plainMatch[1];
-    }
-    fileName = fileName?.trim();
-    if (fileName) {
-      state.sourceName = fileName.replace(/\.(xlsx|xlsm?|csv)$/i, '');
-    }
-
-    const info = extractMonthYearFromText(fileName);
-    if (info.month) {
-      state.activeMonth = info.month;
-    }
-    if (info.year) {
-      state.activeYear = info.year;
+  function stopPolling() {
+    if (state.pollTimer) {
+      window.clearInterval(state.pollTimer);
+      state.pollTimer = null;
     }
   }
 
-  async function ingestWorkbook(buffer) {
-    const workbook = XLSX.read(buffer, { type: 'array' });
-    const dataset = extractSchedule(workbook);
-    if (!dataset.length) {
-      throw new Error('Fant ingen vakter i arket. Kontroller at strukturen er uendret.');
+  // ===================================================================
+  // Cache (rask oppstart)
+  // ===================================================================
+  function loadCachedDataset() {
+    const cached = safeParse(window.localStorage.getItem(storageKeys.data));
+    if (!cached?.data?.length || cached.meta?.spreadsheetId !== CONFIG.SPREADSHEET_ID) {
+      return false;
     }
-    state.data = dataset;
-    state.lastUpdated = Date.now();
+    state.data = cached.data;
+    state.dataHash = cached.hash || '';
+    state.activeMonth = cached.meta.month || state.activeMonth;
+    state.activeYear = cached.meta.year || state.activeYear;
+    state.sourceName = cached.meta.sourceName || '';
+    state.lastUpdated = cached.createdAt || null;
+
     buildRosterData();
-    updateSummary(dataset, Date.now());
     enableSelectors();
     applySelectionFallbacks();
     renderSelections();
+    setStatus('loading', 'Viser lagret plan – oppdaterer …');
+    return true;
   }
 
-  function extractSchedule(workbook) {
+  function persistData() {
+    window.localStorage.setItem(
+      storageKeys.data,
+      JSON.stringify({
+        createdAt: state.lastUpdated,
+        hash: state.dataHash,
+        data: state.data,
+        meta: {
+          spreadsheetId: CONFIG.SPREADSHEET_ID,
+          month: state.activeMonth,
+          year: state.activeYear,
+          sourceName: state.sourceName,
+        },
+      }),
+    );
+  }
+
+  // ===================================================================
+  // Tolking av arket (matrise -> dataset)
+  // ===================================================================
+  function extractSchedule(sheets) {
     const dataset = [];
 
-    workbook.SheetNames.forEach((sheetName) => {
-      const sheet = workbook.Sheets[sheetName];
-      if (!sheet || !sheet['!ref']) return;
-
-      const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, blankrows: false });
-      if (!matrix.length) return;
+    sheets.forEach(({ title, matrix }) => {
+      if (!Array.isArray(matrix) || !matrix.length) return;
 
       const dateRowIndex = matrix.findIndex((row) => {
         const label = cleanString(row?.[0]);
@@ -394,7 +597,7 @@
 
         if (shifts.length) {
           dataset.push({
-            department: sheetName?.trim() || 'Uten navn',
+            department: (title || '').trim() || 'Uten navn',
             person,
             shifts,
           });
@@ -406,15 +609,27 @@
   }
 
   function buildDateFromHeader(value) {
-    if (value === undefined || value === null) return null;
-    const numericDay =
-      typeof value === 'number'
-        ? Math.round(value)
-        : Number.parseInt(String(value).replace(/[^\d]/g, ''), 10);
-    if (!Number.isFinite(numericDay)) return null;
+    if (value === undefined || value === null || value === '') return null;
+    const str = String(value).trim();
+
+    // Full dato i header (f.eks. "01.11.2025" eller "1/11")
+    const dmy = str.match(/(\d{1,2})[.\/-](\d{1,2})(?:[.\/-](\d{2,4}))?/);
+    if (dmy) {
+      const day = Number.parseInt(dmy[1], 10);
+      const month = Number.parseInt(dmy[2], 10);
+      let year = dmy[3] ? Number.parseInt(dmy[3], 10) : state.activeYear;
+      if (year < 100) year += 2000;
+      const iso = toISODateComponents(year, month, day);
+      if (iso) return iso;
+    }
+
+    // Bare dagnummer (1, 2, 3 …) – kombineres med måned/år fra arknavnet.
+    const day = typeof value === 'number'
+      ? Math.round(value)
+      : Number.parseInt(str.replace(/[^\d]/g, ''), 10);
+    if (!Number.isFinite(day) || day < 1 || day > 31) return null;
     if (!state.activeMonth || !state.activeYear) return null;
-    const iso = toISODateComponents(state.activeYear, state.activeMonth, numericDay);
-    return iso;
+    return toISODateComponents(state.activeYear, state.activeMonth, day);
   }
 
   function parseShiftDetail(value) {
@@ -423,9 +638,7 @@
     if (typeof value === 'number') {
       if (value > 0 && value < 1) {
         const totalMinutes = Math.round(value * 24 * 60);
-        const hours = Math.floor(totalMinutes / 60);
-        const minutes = totalMinutes % 60;
-        return { kind: 'time', value: formatTime(hours, minutes) };
+        return { kind: 'time', value: formatTime(Math.floor(totalMinutes / 60), totalMinutes % 60) };
       }
       const formatted = formatDigitsAsTime(String(Math.round(value)));
       return formatted ? { kind: 'time', value: formatted } : null;
@@ -442,15 +655,11 @@
           value: formatTime(Number.parseInt(colonMatch[1], 10), Number.parseInt(colonMatch[2], 10)),
         };
       }
-
       const digits = normalized.replace(/[^\d]/g, '');
       if (/^\d{3,4}$/.test(digits)) {
         const formatted = formatDigitsAsTime(digits);
-        if (formatted) {
-          return { kind: 'time', value: formatted };
-        }
+        if (formatted) return { kind: 'time', value: formatted };
       }
-
       return { kind: 'text', value: trimmed };
     }
 
@@ -459,25 +668,30 @@
 
   function formatDigitsAsTime(digits) {
     if (!digits) return null;
-    if (digits.length <= 2) {
-      return formatTime(Number.parseInt(digits, 10), 0);
-    }
+    if (digits.length <= 2) return formatTime(Number.parseInt(digits, 10), 0);
     if (digits.length === 3) {
       return formatTime(Number.parseInt(digits.slice(0, 1), 10), Number.parseInt(digits.slice(1), 10));
     }
-    return formatTime(
-      Number.parseInt(digits.slice(0, 2), 10),
-      Number.parseInt(digits.slice(2, 4), 10),
-    );
+    return formatTime(Number.parseInt(digits.slice(0, 2), 10), Number.parseInt(digits.slice(2, 4), 10));
   }
 
   function formatTime(hours, minutes) {
     if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
-    if (hours < 0 || hours > 23) return null;
-    if (minutes < 0 || minutes > 59) return null;
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
   }
 
+  function applyTitleMetadata(title) {
+    const clean = cleanString(title);
+    if (clean) state.sourceName = clean.replace(/\.(xlsx|xlsm?|csv)$/i, '');
+    const info = extractMonthYearFromText(clean);
+    if (info.month) state.activeMonth = info.month;
+    if (info.year) state.activeYear = info.year;
+  }
+
+  // ===================================================================
+  // Brukervalg: avdeling / navn / fremtid
+  // ===================================================================
   function handleDepartmentChange(event) {
     state.selectedDepartment = event.target.value;
     persistSelection();
@@ -509,36 +723,25 @@
 
   function populateDepartmentSelect() {
     const select = els.department;
+    if (!select) return;
     select.innerHTML = '';
-
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = 'Velg avdeling';
+    const placeholder = createOption('', 'Velg avdeling');
     select.appendChild(placeholder);
 
-    const departments = Array.from(new Set(state.data.map((entry) => entry.department))).sort((a, b) =>
-      a.localeCompare(b, 'no'),
-    );
-
+    const departments = Array.from(new Set(state.data.map((entry) => entry.department)))
+      .sort((a, b) => a.localeCompare(b, 'no'));
     departments.forEach((department) => {
-      const option = document.createElement('option');
-      option.value = department;
-      option.textContent = department;
-      if (department === state.selectedDepartment) {
-        option.selected = true;
-      }
+      const option = createOption(department, department);
+      if (department === state.selectedDepartment) option.selected = true;
       select.appendChild(option);
     });
   }
 
   function populatePersonSelect() {
     const select = els.person;
+    if (!select) return;
     select.innerHTML = '';
-
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = state.selectedDepartment ? 'Velg navn' : 'Velg avdeling først';
-    select.appendChild(placeholder);
+    select.appendChild(createOption('', state.selectedDepartment ? 'Velg navn' : 'Velg avdeling først'));
 
     if (!state.selectedDepartment) {
       state.selectedPerson = '';
@@ -550,25 +753,22 @@
       .filter((entry) => entry.department === state.selectedDepartment)
       .map((entry) => entry.person)
       .sort((a, b) => a.localeCompare(b, 'no'));
-
     names.forEach((name) => {
-      const option = document.createElement('option');
-      option.value = name;
-      option.textContent = name;
-      if (name === state.selectedPerson) {
-        option.selected = true;
-      }
+      const option = createOption(name, name);
+      if (name === state.selectedPerson) option.selected = true;
       select.appendChild(option);
     });
   }
 
   function renderShifts() {
-    els.shiftList.innerHTML = '';
+    const container = els.shiftList;
+    if (!container) return;
+    container.innerHTML = '';
 
     if (!state.selectedDepartment || !state.selectedPerson) {
-      els.shiftList.classList.add('empty');
-      els.shiftList.innerHTML = '<p>Velg avdeling og navn for å se vaktene.</p>';
-      els.info.textContent = 'Velg hvem du vil se vakter for.';
+      container.classList.add('empty');
+      container.innerHTML = '<p class="placeholder">Velg avdeling og navn for å se vaktene.</p>';
+      if (els.info) els.info.textContent = 'Velg hvem du vil se vakter for.';
       return;
     }
 
@@ -576,8 +776,8 @@
       (item) => item.department === state.selectedDepartment && item.person === state.selectedPerson,
     );
     if (!entry) {
-      els.shiftList.classList.add('empty');
-      els.shiftList.innerHTML = '<p>Fant ikke vakter for valget ditt.</p>';
+      container.classList.add('empty');
+      container.innerHTML = '<p class="placeholder">Fant ikke vakter for valget ditt.</p>';
       return;
     }
 
@@ -590,12 +790,13 @@
       .filter((shift) => !state.showFutureOnly || shift.dateObj >= todayDate);
 
     if (!list.length) {
-      els.shiftList.classList.add('empty');
-      els.shiftList.innerHTML = '<p>Ingen vakter i den valgte perioden.</p>';
+      container.classList.add('empty');
+      container.innerHTML = '<p class="placeholder">Ingen vakter i den valgte perioden.</p>';
+      if (els.info) els.info.textContent = `Ingen kommende vakter for ${state.selectedPerson}.`;
       return;
     }
 
-    els.shiftList.classList.remove('empty');
+    container.classList.remove('empty');
     const fragment = document.createDocumentFragment();
     let lastWeekKey = '';
 
@@ -611,9 +812,7 @@
 
       const article = document.createElement('article');
       article.className = 'shift-item';
-      if (isSameDay(shift.dateObj, todayDate)) {
-        article.classList.add('today');
-      }
+      if (isSameDay(shift.dateObj, todayDate)) article.classList.add('today');
 
       const date = document.createElement('div');
       date.className = 'shift-item__date';
@@ -621,10 +820,9 @@
 
       const time = document.createElement('div');
       time.className = 'shift-item__time';
-      const detailValue = shift.detail ?? shift.startTime ?? '';
-      const isTextDetail =
-        (shift.kind === 'text') || (detailValue && !/^\d{2}:\d{2}$/.test(detailValue));
-      time.textContent = isTextDetail ? detailValue : `Oppstart: ${detailValue}`;
+      const detailValue = shift.detail ?? '';
+      const isTextDetail = shift.kind === 'text' || (detailValue && !/^\d{2}:\d{2}$/.test(detailValue));
+      time.textContent = isTextDetail ? detailValue : `Oppstart ${detailValue}`;
 
       const meta = document.createElement('div');
       meta.className = 'shift-item__meta';
@@ -634,59 +832,100 @@
       fragment.appendChild(article);
     });
 
-    els.shiftList.appendChild(fragment);
+    container.appendChild(fragment);
     const scope = state.showFutureOnly ? ' (kun kommende)' : '';
-    els.info.textContent = `Viser ${list.length} vakter for ${state.selectedPerson}${scope}.`;
+    if (els.info) els.info.textContent = `Viser ${list.length} vakter for ${state.selectedPerson}${scope}.`;
+  }
+
+  // ===================================================================
+  // "Hvem er på jobb"
+  // ===================================================================
+  function buildRosterData() {
+    const previousDate = state.selectedRosterDate;
+    const previousDepartment = state.selectedRosterDepartment;
+    state.rosterMap = new Map();
+    state.rosterDates = [];
+    state.rosterDepartments = [];
+    state.selectedRosterDate = '';
+    state.selectedRosterDepartment = '';
+    if (!state.data?.length) return;
+
+    const departmentSet = new Set();
+    state.data.forEach((entry) => {
+      if (entry.department) departmentSet.add(entry.department);
+      entry.shifts.forEach((shift) => {
+        if (!shift?.date) return;
+        const detailValue = shift.detail ?? '';
+        const kind = shift.kind || (/^\d{2}:\d{2}$/.test(detailValue) ? 'time' : 'text');
+        const existing = state.rosterMap.get(shift.date) || [];
+        existing.push({ person: entry.person, department: entry.department, detail: detailValue, kind });
+        state.rosterMap.set(shift.date, existing);
+      });
+    });
+
+    state.rosterDepartments = Array.from(departmentSet).sort((a, b) => a.localeCompare(b, 'no'));
+    state.rosterMap.forEach((rows) => rows.sort(compareRosterEntries));
+    state.rosterDates = Array.from(state.rosterMap.keys()).sort();
+
+    if (previousDepartment && state.rosterDepartments.includes(previousDepartment)) {
+      state.selectedRosterDepartment = previousDepartment;
+    }
+    state.selectedRosterDate =
+      previousDate && state.rosterDates.includes(previousDate) ? previousDate : pickDefaultRosterDate();
+  }
+
+  function compareRosterEntries(a, b) {
+    const byTime = rosterTimeValue(a).localeCompare(rosterTimeValue(b));
+    if (byTime !== 0) return byTime;
+    const byDept = a.department.localeCompare(b.department, 'no');
+    if (byDept !== 0) return byDept;
+    return a.person.localeCompare(b.person, 'no');
+  }
+
+  function rosterTimeValue(entry) {
+    if (!entry?.detail) return '99:99';
+    if (entry.kind === 'time' || /^\d{2}:\d{2}$/.test(entry.detail)) return entry.detail;
+    return '99:99';
+  }
+
+  function pickDefaultRosterDate() {
+    if (!state.rosterDates?.length) return '';
+    const todayISO = new Date().toISOString().slice(0, 10);
+    return state.rosterDates.find((date) => date >= todayISO) || state.rosterDates[0];
   }
 
   function renderRosterControls() {
-    const select = els.rosterDateSelect;
+    const dateSelect = els.rosterDateSelect;
     const deptSelect = els.rosterDepartmentSelect;
-    if (!select) return;
-    select.innerHTML = '';
+    if (!dateSelect) return;
+
     if (deptSelect) {
       deptSelect.innerHTML = '';
-      const deptOption = document.createElement('option');
-      deptOption.value = '';
-      deptOption.textContent = 'Alle avdelinger';
-      deptSelect.appendChild(deptOption);
-      const departments = getRosterDepartments();
-      if (!departments.includes(state.selectedRosterDepartment)) {
-        state.selectedRosterDepartment = '';
-      }
+      deptSelect.appendChild(createOption('', 'Alle avdelinger'));
+      const departments = state.rosterDepartments || [];
+      if (!departments.includes(state.selectedRosterDepartment)) state.selectedRosterDepartment = '';
       departments.forEach((dept) => {
-        const option = document.createElement('option');
-        option.value = dept;
-        option.textContent = dept;
-        if (dept === state.selectedRosterDepartment) {
-          option.selected = true;
-        }
+        const option = createOption(dept, dept);
+        if (dept === state.selectedRosterDepartment) option.selected = true;
         deptSelect.appendChild(option);
       });
       deptSelect.disabled = departments.length === 0;
     }
-    const dates = getAvailableRosterDates();
+
+    dateSelect.innerHTML = '';
+    const dates = state.rosterDates || [];
     if (!dates.length) {
-      select.disabled = true;
-      const option = document.createElement('option');
-      option.value = '';
-      option.textContent = state.data.length ? 'Ingen datoer i filteret' : 'Ingen datoer tilgjengelig';
-      select.appendChild(option);
+      dateSelect.disabled = true;
+      dateSelect.appendChild(createOption('', state.data.length ? 'Ingen datoer' : 'Ingen datoer tilgjengelig'));
       state.selectedRosterDate = '';
       return;
     }
-    select.disabled = false;
-    if (!dates.includes(state.selectedRosterDate)) {
-      state.selectedRosterDate = dates[0];
-    }
+    dateSelect.disabled = false;
+    if (!dates.includes(state.selectedRosterDate)) state.selectedRosterDate = dates[0];
     dates.forEach((date) => {
-      const option = document.createElement('option');
-      option.value = date;
-      option.textContent = capitalize(dateFormatter.format(new Date(`${date}T00:00:00`)));
-      if (date === state.selectedRosterDate) {
-        option.selected = true;
-      }
-      select.appendChild(option);
+      const option = createOption(date, capitalize(dateFormatter.format(new Date(`${date}T00:00:00`))));
+      if (date === state.selectedRosterDate) option.selected = true;
+      dateSelect.appendChild(option);
     });
   }
 
@@ -697,19 +936,18 @@
 
     if (!state.selectedRosterDate) {
       container.classList.add('empty');
-      container.innerHTML = '<p>Ingen dato valgt ennå.</p>';
+      container.innerHTML = '<p class="placeholder">Ingen dato valgt ennå.</p>';
       return;
     }
 
     const entries = state.rosterMap.get(state.selectedRosterDate) || [];
-    const filtered = entries.filter((entry) => {
-      if (!state.selectedRosterDepartment) return true;
-      return entry.department === state.selectedRosterDepartment;
-    });
+    const filtered = entries.filter(
+      (entry) => !state.selectedRosterDepartment || entry.department === state.selectedRosterDepartment,
+    );
 
     if (!filtered.length) {
       container.classList.add('empty');
-      container.innerHTML = '<p>Ingen registrerte vakter for valgene dine.</p>';
+      container.innerHTML = '<p class="placeholder">Ingen registrerte vakter for valgene dine.</p>';
       return;
     }
 
@@ -735,7 +973,6 @@
       item.append(left, detail);
       fragment.appendChild(item);
     });
-
     container.appendChild(fragment);
   }
 
@@ -746,118 +983,89 @@
 
   function handleRosterDepartmentChange(event) {
     state.selectedRosterDepartment = event.target.value;
+    renderRosterControls();
     renderRosterList();
   }
 
-  function buildRosterData() {
-    const previousDate = state.selectedRosterDate;
-    const previousDepartment = state.selectedRosterDepartment;
-    state.rosterMap = new Map();
-    state.rosterDates = [];
-    state.rosterDepartments = [];
-    state.selectedRosterDate = '';
-    state.selectedRosterDepartment = '';
-    if (!state.data?.length) return;
+  // ===================================================================
+  // Selektorer + brukermeny + status + refresh-knapp
+  // ===================================================================
+  function enableSelectors() {
+    if (els.department) els.department.disabled = false;
+    if (els.person) els.person.disabled = false;
+  }
 
-    const departmentSet = new Set();
-    state.data.forEach((entry) => {
-      if (entry.department) {
-        departmentSet.add(entry.department);
-      }
-      entry.shifts.forEach((shift) => {
-        if (!shift?.date) return;
-        const detailValue = shift.detail ?? shift.startTime ?? '';
-        const kind =
-          shift.kind ||
-          (detailValue && /^\d{2}:\d{2}$/.test(detailValue) ? 'time' : 'text');
-        const existing = state.rosterMap.get(shift.date) || [];
-        existing.push({
-          person: entry.person,
-          department: entry.department,
-          detail: detailValue,
-          kind,
-        });
-        state.rosterMap.set(shift.date, existing);
-      });
-    });
-
-    state.rosterDepartments = Array.from(departmentSet).sort((a, b) => a.localeCompare(b, 'no'));
-    state.rosterMap.forEach((list) => list.sort(compareRosterEntries));
-    state.rosterDates = Array.from(state.rosterMap.keys()).sort();
-    if (previousDepartment && state.rosterDepartments.includes(previousDepartment)) {
-      state.selectedRosterDepartment = previousDepartment;
+  function applySelectionFallbacks() {
+    if (!state.data.length) {
+      state.selectedDepartment = '';
+      state.selectedPerson = '';
+      persistSelection();
+      return;
     }
+    if (!state.data.some((entry) => entry.department === state.selectedDepartment)) {
+      state.selectedDepartment = '';
+      state.selectedPerson = '';
+    }
+    if (
+      state.selectedDepartment &&
+      !state.data.some(
+        (entry) => entry.department === state.selectedDepartment && entry.person === state.selectedPerson,
+      )
+    ) {
+      state.selectedPerson = '';
+    }
+    persistSelection();
+  }
 
-    if (previousDate && state.rosterDates.includes(previousDate)) {
-      state.selectedRosterDate = previousDate;
-    } else {
-      state.selectedRosterDate = pickDefaultRosterDate();
+  function persistSelection() {
+    window.localStorage.setItem(
+      storageKeys.selection,
+      JSON.stringify({ department: state.selectedDepartment, person: state.selectedPerson }),
+    );
+  }
+
+  function renderUser() {
+    if (!state.user) return;
+    const { email = '', name = '', picture = '' } = state.user;
+    if (els.userName) els.userName.textContent = name || email;
+    if (els.userEmail) els.userEmail.textContent = email;
+    const initial = (name || email || '?').trim().charAt(0).toUpperCase();
+    if (els.userInitial) els.userInitial.textContent = initial;
+    if (picture && els.userAvatar && els.userButton) {
+      els.userAvatar.src = picture;
+      els.userAvatar.onload = () => els.userButton.classList.add('has-avatar');
+      els.userAvatar.onerror = () => els.userButton.classList.remove('has-avatar');
     }
   }
 
-  function compareRosterEntries(a, b) {
-    const timeCompare = rosterTimeValue(a).localeCompare(rosterTimeValue(b));
-    if (timeCompare !== 0) return timeCompare;
-    const deptCompare = a.department.localeCompare(b.department, 'no');
-    if (deptCompare !== 0) return deptCompare;
-    return a.person.localeCompare(b.person, 'no');
+  function toggleUserMenu() {
+    if (!els.userPopover) return;
+    const open = els.userPopover.hidden;
+    els.userPopover.hidden = !open;
+    els.userButton?.setAttribute('aria-expanded', String(open));
   }
 
-  function rosterTimeValue(entry) {
-    if (!entry?.detail) return '99:99';
-    if (entry.kind === 'time' || /^\d{2}:\d{2}$/.test(entry.detail)) {
-      return entry.detail;
-    }
-    return '99:99';
+  function closeUserMenu() {
+    if (!els.userPopover) return;
+    els.userPopover.hidden = true;
+    els.userButton?.setAttribute('aria-expanded', 'false');
   }
 
-  function getAvailableRosterDates() {
-    if (!state.rosterDates?.length) return [];
-    return state.rosterDates;
-  }
-
-  function pickDefaultRosterDate() {
-    if (!state.rosterDates?.length) return '';
-    const todayISO = new Date().toISOString().slice(0, 10);
-    return state.rosterDates.find((date) => date >= todayISO) || state.rosterDates[0];
-  }
-
-  function getRosterDepartments() {
-    return state.rosterDepartments || [];
-  }
-
-  function enhanceRefreshButton(button) {
-    if (!button || button.dataset.decorated === 'true') return;
-    const label = button.textContent?.trim() || 'Oppdater nå';
-    button.dataset.decorated = 'true';
-    button.dataset.label = label;
-    button.classList.add('refresh-button');
-    button.setAttribute('aria-live', 'polite');
-    button.innerHTML = `
-      <span class="refresh-visual" aria-hidden="true">
-        <svg class="refresh-ring" viewBox="0 0 70 70" focusable="false" aria-hidden="true">
-          <g class="refresh-ring__spinner">
-            <circle class="refresh-ring__bg" cx="35" cy="35" r="30" />
-            <circle class="refresh-ring__fg" cx="35" cy="35" r="30" />
-          </g>
-          <polyline class="refresh-check" points="22,36 33,47 48,22" />
-        </svg>
-      </span>
-      <span class="refresh-label">${label}</span>
-    `;
+  function setStatus(stateName, text) {
+    if (els.statusBar) els.statusBar.dataset.state = stateName;
+    if (els.statusText) els.statusText.textContent = text;
   }
 
   function setRefreshState(mode) {
-    if (!els.refreshButtons?.length) return;
-    clearTimeout(state.refreshTimeout);
+    if (!els.refreshButtons.length) return;
+    window.clearTimeout(state.refreshTimeout);
 
-    if (mode === 'loading') {
-      state.refreshStartedAt = Date.now();
-    }
+    if (mode === 'loading') state.refreshStartedAt = Date.now();
 
+    // La spinneren snurre litt før vi viser haken.
     if (mode === 'success') {
       const elapsed = Date.now() - state.refreshStartedAt;
-      const minimumSpin = 2200;
+      const minimumSpin = 600;
       if (elapsed < minimumSpin) {
         state.refreshTimeout = window.setTimeout(() => setRefreshState('success'), minimumSpin - elapsed);
         return;
@@ -868,23 +1076,23 @@
       button.classList.remove('is-loading', 'is-success');
       button.disabled = mode === 'loading';
       button.setAttribute('aria-busy', mode === 'loading' ? 'true' : 'false');
-      if (mode === 'loading') {
-        button.classList.add('is-loading');
-      }
-      if (mode === 'success') {
-        button.classList.add('is-success');
-      }
-      if (mode === 'idle') {
-        const labelEl = button.querySelector('.refresh-label');
-        if (labelEl) {
-          labelEl.textContent = button.dataset.label || 'Oppdater nå';
-        }
-      }
+      if (mode === 'loading') button.classList.add('is-loading');
+      if (mode === 'success') button.classList.add('is-success');
     });
 
     if (mode === 'success') {
-      state.refreshTimeout = window.setTimeout(() => setRefreshState('idle'), 1500);
+      state.refreshTimeout = window.setTimeout(() => setRefreshState('idle'), 1400);
     }
+  }
+
+  // ===================================================================
+  // Hjelpere
+  // ===================================================================
+  function createOption(value, label) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    return option;
   }
 
   function buildWeekLabel(date) {
@@ -906,9 +1114,7 @@
   function startOfISOWeek(date) {
     const clone = new Date(date);
     const day = clone.getDay() || 7;
-    if (day !== 1) {
-      clone.setDate(clone.getDate() - day + 1);
-    }
+    if (day !== 1) clone.setDate(clone.getDate() - day + 1);
     clone.setHours(0, 0, 0, 0);
     return clone;
   }
@@ -917,168 +1123,27 @@
     return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
   }
 
-  function applySelectionFallbacks() {
-    if (!state.data.length) {
-      state.selectedDepartment = '';
-      state.selectedPerson = '';
-      persistSelection();
-      return;
-    }
-    if (!state.data.some((entry) => entry.department === state.selectedDepartment)) {
-      state.selectedDepartment = state.data[0]?.department || '';
-      state.selectedPerson = '';
-    }
-    if (
-      state.selectedDepartment &&
-      !state.data.some(
-        (entry) => entry.department === state.selectedDepartment && entry.person === state.selectedPerson,
-      )
-    ) {
-      state.selectedPerson =
-        state.data.find((entry) => entry.department === state.selectedDepartment)?.person || '';
-    }
-    persistSelection();
-  }
-
-  function persistSelection() {
-    window.localStorage.setItem(
-      storageKeys.selection,
-      JSON.stringify({
-        department: state.selectedDepartment,
-        person: state.selectedPerson,
-      }),
-    );
-  }
-
-  function persistData() {
-    const exportUrl = getExportUrl();
-    state.lastUpdated = Date.now();
-    window.localStorage.setItem(
-      storageKeys.data,
-      JSON.stringify({
-        createdAt: state.lastUpdated,
-        data: state.data,
-        meta: {
-          month: state.activeMonth,
-          year: state.activeYear,
-          sourceName: state.sourceName,
-          sourceLink: exportUrl,
-        },
-      }),
-    );
-  }
-
-  function enableSelectors() {
-    els.department.disabled = false;
-    els.person.disabled = false;
-  }
-
-  function disableSelectors() {
-    els.department.disabled = true;
-    els.person.disabled = true;
-  }
-
-  function updateSummary(dataset, timestamp) {
-    if (!dataset?.length) {
-      return;
-    }
-
-    const departmentCount = new Set(dataset.map((entry) => entry.department)).size;
-    const peopleCount = dataset.length;
-    const shiftCount = dataset.reduce((total, entry) => total + entry.shifts.length, 0);
-    const timestampText = timestamp ? ` • sist oppdatert ${formatTimestamp(timestamp)}` : '';
-    const planLabel = formatPlanLabel();
-    const source = state.sourceName ? `Kilde: ${state.sourceName}. ` : '';
-    console.info(
-      `${planLabel ? `Plan for ${planLabel}. ` : ''}${source}Fant ${departmentCount} avdelinger, ${peopleCount} personer og ${shiftCount} vakter${timestampText}.`,
-    );
-  }
-
-  function formatPlanLabel() {
+  function planSuffix() {
     if (!state.activeMonth || !state.activeYear) return '';
     const label = MONTH_LABELS[state.activeMonth] || `måned ${state.activeMonth}`;
-    return `${label} ${state.activeYear}`;
+    return ` • ${label} ${state.activeYear}`;
   }
 
-  function formatTimestamp(timestamp) {
-    return new Intl.DateTimeFormat('no-NO', {
-      day: 'numeric',
-      month: 'long',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(timestamp);
+  function formatClock(timestamp) {
+    return new Intl.DateTimeFormat('no-NO', { hour: '2-digit', minute: '2-digit' }).format(timestamp);
   }
 
-  function setStatus(message) {
-    console.info(message);
-  }
-
-  function handleError(error) {
-    console.error(error);
-    setStatus(error?.message || 'Noe gikk galt. Prøv igjen.');
-  }
-
-  function cleanString(value) {
-    if (value === undefined || value === null) return '';
-    return String(value).replace(/\s+/g, ' ').trim();
-  }
-
-  function safeParse(value) {
-    if (!value) return null;
-    try {
-      return JSON.parse(value);
-    } catch (error) {
-      console.warn('Kunne ikke parse lagret data', error);
-      return null;
+  function extractMonthYearFromText(text) {
+    if (!text) return {};
+    const normalized = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    let month;
+    for (const [keyword, value] of Object.entries(MONTH_KEYWORDS)) {
+      if (normalized.includes(keyword)) { month = value; break; }
     }
-  }
-
-  function clearLocalCacheAndSelection() {
-    window.localStorage.removeItem(storageKeys.data);
-    window.localStorage.removeItem(storageKeys.selection);
-    state.data = [];
-    state.selectedDepartment = '';
-    state.selectedPerson = '';
-    state.lastUpdated = null;
-    buildRosterData();
-    disableSelectors();
-    if (els.shiftList) {
-      els.shiftList.classList.add('empty');
-      els.shiftList.innerHTML = '<p>Henter fersk plan ...</p>';
-    }
-    if (els.info) {
-      els.info.textContent = 'Henter fersk plan �?" vennligst vent.';
-    }
-    renderRosterControls();
-    renderRosterList();
-  }
-
-  function purgeCachedDatasetOnFailure() {
-    window.localStorage.removeItem(storageKeys.data);
-    state.data = [];
-    state.lastUpdated = null;
-    buildRosterData();
-    disableSelectors();
-    renderRosterControls();
-    renderRosterList();
-    if (els.shiftList) {
-      els.shiftList.classList.add('empty');
-      els.shiftList.innerHTML = '<p>Kunne ikke hente fersk plan. Sjekk delingslenken og fors��k igjen.</p>';
-    }
-    if (els.info) {
-      els.info.textContent = 'Kunne ikke hente plan. Trykk "Oppdater nǾ" igjen etter at deling er i orden.';
-    }
-  }
-
-  function looksLikeHtml(buffer) {
-    if (!buffer) return false;
-    try {
-      const decoder = new TextDecoder('utf-8');
-      const snippet = decoder.decode(buffer.slice(0, 200)).toLowerCase();
-      return snippet.includes('<html') || snippet.includes('<!doctype html');
-    } catch (error) {
-      return false;
-    }
+    const yearMatch = normalized.match(/\b(20\d{2}|\d{2})\b/);
+    let year = yearMatch ? Number.parseInt(yearMatch[1], 10) : undefined;
+    if (year && year < 100) year += 2000;
+    return { month, year };
   }
 
   function toISODateComponents(year, month, day) {
@@ -1093,50 +1158,9 @@
     return date.toISOString().slice(0, 10);
   }
 
-  function extractMonthYearFromText(text) {
-    if (!text) return {};
-    const normalized = text
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, ''); // strip diacritics
-
-    let month;
-    for (const [keyword, value] of Object.entries(MONTH_KEYWORDS)) {
-      if (normalized.includes(keyword)) {
-        month = value;
-        break;
-      }
-    }
-
-    const yearMatch = normalized.match(/\b(20\d{2}|\d{2})\b/);
-    let year = yearMatch ? Number.parseInt(yearMatch[1], 10) : undefined;
-    if (year && year < 100) {
-      year += 2000;
-    }
-    return { month, year };
-  }
-
-  function buildExportUrl(link) {
-    if (!link) return '';
-    if (link.includes('/export')) return link;
-    const match = link.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-    if (!match) return '';
-    return `https://docs.google.com/spreadsheets/d/${match[1]}/export?format=xlsx`;
-  }
-
-  function getExportUrl(withCacheBust = false) {
-    if (!state.exportBaseUrl) {
-      state.exportBaseUrl = buildExportUrl(SHEET_SHARE_LINK);
-    }
-    if (!state.exportBaseUrl) return '';
-    if (!withCacheBust) return state.exportBaseUrl;
-    const separator = state.exportBaseUrl.includes('?') ? '&' : '?';
-    return `${state.exportBaseUrl}${separator}cb=${Date.now()}`;
-  }
-
-  function isCacheStale() {
-    if (!state.lastUpdated) return true;
-    return Date.now() - state.lastUpdated > AUTO_REFRESH_INTERVAL;
+  function cleanString(value) {
+    if (value === undefined || value === null) return '';
+    return String(value).replace(/\s+/g, ' ').trim();
   }
 
   function capitalize(text) {
@@ -1144,24 +1168,20 @@
     return text.charAt(0).toUpperCase() + text.slice(1);
   }
 
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
-
-    if (state.loading) return;
-
-    if (isCacheStale()) {
-      refreshFromSheet(false, { forceCacheBust: true });
-    } else if (state.data.length) {
-      renderShifts();
+  function quickHash(text) {
+    let hash = 5381;
+    for (let i = 0; i < text.length; i += 1) {
+      hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
     }
-  });
+    return String(hash);
+  }
 
-  window.addEventListener('beforeunload', () => {
-    state.timers.forEach((timer) => clearInterval(timer));
-  });
+  function safeParse(value) {
+    if (!value) return null;
+    try {
+      return JSON.parse(value);
+    } catch (error) {
+      return null;
+    }
+  }
 })();
-
-
-
-
-

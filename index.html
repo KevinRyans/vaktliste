@@ -3,104 +3,183 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#10141a" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Vaktliste" />
   <link rel="canonical" href="https://vaktliste.xyz/" />
   <link rel="icon" type="image/png" href="https://i.imgur.com/5EhW27H.png" />
   <link rel="apple-touch-icon" href="https://i.imgur.com/5EhW27H.png" />
-  <title>Vaktliste</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <title>Vaktliste – Quality Hotel Tønsberg</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div id="accessGate" class="gate hidden">
-    <div class="gate-card">
-      <h2>Velkommen</h2>
-      <p>Skriv inn koden du har fått for å åpne vaktlisten.</p>
-      <input type="password" id="accessCode" placeholder="Kode" inputmode="numeric" />
-      <button type="button" id="accessEnter">Lås opp</button>
-      <p id="accessError" class="gate-error hidden">Feil kode. Prøv igjen.</p>
+  <!-- ============================================================= -->
+  <!-- Innloggings-/tilgangsskjerm. Vises over alt til man er inne.   -->
+  <!-- ============================================================= -->
+  <div id="authScreen" class="auth" data-state="loading">
+    <div class="auth__card">
+      <div class="brand brand--lg">
+        <span class="brand__mark" data-brand-logo aria-hidden="true">
+          <span class="brand__mark-q">Q</span>
+        </span>
+        <span class="brand__text">
+          <span class="brand__eyebrow">Quality Hotel Tønsberg</span>
+          <span class="brand__title">Vaktliste restaurant</span>
+        </span>
+      </div>
+
+      <!-- Laster / sjekker innlogging -->
+      <div class="auth__panel" data-panel="loading">
+        <div class="spinner" aria-hidden="true"></div>
+        <p class="auth__lead">Sjekker innlogging …</p>
+      </div>
+
+      <!-- Be om innlogging -->
+      <div class="auth__panel" data-panel="signin">
+        <p class="auth__lead">
+          Logg inn med Google for å se vaktlisten. Bruk e-postadressen som vaktlisten er delt med.
+        </p>
+        <button id="signInButton" class="google-btn" type="button">
+          <svg class="google-btn__icon" viewBox="0 0 18 18" aria-hidden="true">
+            <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"/>
+            <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.81.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z"/>
+            <path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33z"/>
+            <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.9 11.42 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z"/>
+          </svg>
+          <span>Logg inn med Google</span>
+        </button>
+        <p class="auth__hint">Du forblir innlogget på denne enheten.</p>
+      </div>
+
+      <!-- Logget inn, men mangler tilgang til arket -->
+      <div class="auth__panel" data-panel="denied">
+        <div class="auth__badge auth__badge--warn" aria-hidden="true">!</div>
+        <h2 class="auth__heading">Mangler tilgang</h2>
+        <p class="auth__lead">
+          Kontoen <strong id="deniedEmail"></strong> har ikke tilgang til vaktlisten ennå.
+        </p>
+        <p class="auth__hint">
+          Be den som eier vaktlisten om å dele Google-arket med denne e-posten. Trykk «Prøv igjen» når det er gjort.
+        </p>
+        <div class="auth__actions">
+          <button id="retryButton" class="btn btn--primary" type="button">Prøv igjen</button>
+          <button id="switchAccountButton" class="btn btn--ghost" type="button">Bytt konto</button>
+        </div>
+      </div>
+
+      <!-- Generell feil -->
+      <div class="auth__panel" data-panel="error">
+        <div class="auth__badge auth__badge--warn" aria-hidden="true">!</div>
+        <h2 class="auth__heading">Noe gikk galt</h2>
+        <p class="auth__lead" id="authErrorMessage">Klarte ikke å koble til. Sjekk nett og prøv igjen.</p>
+        <button id="errorRetryButton" class="btn btn--primary" type="button">Prøv igjen</button>
+      </div>
+
+      <!-- Admin har ikke fullført oppsett -->
+      <div class="auth__panel" data-panel="config">
+        <div class="auth__badge auth__badge--warn" aria-hidden="true">⚙</div>
+        <h2 class="auth__heading">Mangler oppsett</h2>
+        <p class="auth__lead">
+          Administrator må fylle inn <code>GOOGLE_CLIENT_ID</code> øverst i <code>script.js</code>.
+        </p>
+        <p class="auth__hint">Se README for steg-for-steg-oppskrift.</p>
+      </div>
     </div>
   </div>
-  <main class="app-shell">
-    <header class="app-header">
-      <div>
-        <p class="eyebrow">Vaktliste</p>
-        <h1>Vaktliste F&B</h1>
-        <p class="lead">
-          Vaktlisten er hentet ut i fra Sarah sin Excel liste - dette er bare en enklere måte for å lese vaktlisten. Alle endringer som skjer i den opprinnelige listen vil vises her automatisk 30 minutter etter endring.<br><br><br><br><br><br><br><br><br>       Laget med ❤️ av Kjell<br><i>Men egentlig Michael</i> 
-        </p>
+
+  <!-- ============================================================= -->
+  <!-- Selve appen.                                                   -->
+  <!-- ============================================================= -->
+  <div class="app" hidden>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand__mark" data-brand-logo aria-hidden="true">
+          <span class="brand__mark-q">Q</span>
+        </span>
+        <span class="brand__text">
+          <span class="brand__eyebrow">Quality Hotel Tønsberg</span>
+          <span class="brand__title">Vaktliste restaurant</span>
+        </span>
       </div>
-      <div class="onboarding">
-        <h2>Slik fungerer det</h2>
-        <ol>
-          <li><strong>1.</strong> <span>Åpne appen – den kobler seg til den siste vaktplanen.</span></li>
-          <li><strong>2.</strong> <span>Velg avdeling og navn.</span></li>
-          <li><strong>3.</strong> <span>Skroll for å se vaktene dine (markerer også dagens vakt).</span></li>
-        </ol>
-        <p class="tip">
-          Oppdateres automatisk hvert 30. minutt. Hvis planen nylig er endret, trykk “Oppdater nå”.
-        </p>
-        <button type="button" data-role="refresh" class="refresh-top refresh-button">
-          <span class="refresh-visual" aria-hidden="true">
-            <svg class="refresh-ring" viewBox="0 0 70 70" focusable="false" aria-hidden="true">
-              <g class="refresh-ring__spinner">
-                <circle class="refresh-ring__bg" cx="35" cy="35" r="30" />
-                <circle class="refresh-ring__fg" cx="35" cy="35" r="30" />
-              </g>
-              <polyline class="refresh-check" points="22,36 33,47 48,22" />
+      <div class="topbar__actions">
+        <button type="button" data-role="refresh" class="refresh-button" aria-live="polite">
+          <span class="refresh-button__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" class="refresh-button__arrows" focusable="false">
+              <path d="M21 12a9 9 0 1 1-2.64-6.36" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <path d="M21 4v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <svg viewBox="0 0 24 24" class="refresh-button__check" focusable="false">
+              <path d="M5 12.5 10 17.5 19 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </span>
-          <span class="refresh-label">Oppdater nå</span>
+          <span class="refresh-button__label">Oppdater</span>
         </button>
+        <div class="user-menu">
+          <button id="userButton" class="user-chip" type="button" aria-haspopup="true" aria-expanded="false">
+            <img id="userAvatar" class="user-chip__avatar" alt="" />
+            <span id="userInitial" class="user-chip__initial" aria-hidden="true"></span>
+          </button>
+          <div id="userPopover" class="user-popover" hidden>
+            <p class="user-popover__name" id="userName"></p>
+            <p class="user-popover__email" id="userEmail"></p>
+            <button id="signOutButton" class="btn btn--ghost btn--block" type="button">Logg ut</button>
+          </div>
+        </div>
       </div>
     </header>
 
-    <section class="card selection-card">
-      <h3>Velg avdeling og navn</h3>
-      <div class="selectors">
-        <label>
-          Avdeling
-          <select id="departmentSelect" disabled>
-            <option value="">Ingen data</option>
-          </select>
-        </label>
-        <label>
-          Navn
-          <select id="personSelect" disabled>
-            <option value="">Velg avdeling først</option>
-          </select>
-        </label>
-      </div>
-      <div class="toggle">
-        <label class="switch">
-          <input type="checkbox" id="futureToggle" />
-          <span class="slider"></span>
-        </label>
-        <div>
-          <p class="toggle-title">Vis bare kommende vakter</p>
-          <p class="toggle-desc">Skru av for å se hele måneden.</p>
-        </div>
-      </div>
-      <p class="info" id="selectionInfo">Planen hentes automatisk – du trenger bare å velge deg selv.</p>
-    </section>
+    <div id="statusBar" class="statusbar" role="status" aria-live="polite">
+      <span class="statusbar__dot"></span>
+      <span class="statusbar__text">Kobler til vaktlisten …</span>
+    </div>
 
-    <section class="card shift-card">
-      <div class="shift-card__header">
-        <div>
-          <h3>Vaktoversikt</h3>
-          <p class="small">Sorter automatisk etter dato. Dagens vakter blir markert.</p>
+    <main class="app__main">
+      <section class="card selection-card">
+        <h2 class="card__title">Velg avdeling og navn</h2>
+        <div class="selectors">
+          <label class="field">
+            <span class="field__label">Avdeling</span>
+            <select id="departmentSelect" disabled>
+              <option value="">Ingen data</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field__label">Navn</span>
+            <select id="personSelect" disabled>
+              <option value="">Velg avdeling først</option>
+            </select>
+          </label>
         </div>
-      </div>
-      <div id="shiftList" class="shift-list empty">
-        <p>Ingen vakter å vise enda.</p>
-      </div>
-    </section>
+        <label class="toggle">
+          <span class="switch">
+            <input type="checkbox" id="futureToggle" />
+            <span class="switch__track"><span class="switch__thumb"></span></span>
+          </span>
+          <span class="toggle__text">
+            <span class="toggle__title">Vis bare kommende vakter</span>
+            <span class="toggle__desc">Skru av for å se hele perioden.</span>
+          </span>
+        </label>
+        <p class="info" id="selectionInfo">Vaktlisten hentes automatisk – du trenger bare å velge deg selv.</p>
+      </section>
 
-    <section class="card roster-card">
-      <div class="roster-card__header">
-        <div>
-          <h3>Hvem er på jobb</h3>
-          <p class="small">Velg avdeling og dato for å se alle medarbeidere som er satt opp den dagen.</p>
+      <section class="card shift-card">
+        <div class="card__head">
+          <h2 class="card__title">Vaktoversikt</h2>
+          <p class="card__sub">Sortert etter dato. Dagens vakt blir markert.</p>
+        </div>
+        <div id="shiftList" class="shift-list empty">
+          <p class="placeholder">Ingen vakter å vise enda.</p>
+        </div>
+      </section>
+
+      <section class="card roster-card">
+        <div class="card__head">
+          <h2 class="card__title">Hvem er på jobb</h2>
+          <p class="card__sub">Velg avdeling og dato for å se alle som er satt opp den dagen.</p>
         </div>
         <div class="roster-controls">
           <select id="rosterDepartmentSelect" disabled>
@@ -110,14 +189,19 @@
             <option value="">Ingen datoer</option>
           </select>
         </div>
-      </div>
-      <div id="rosterList" class="roster-list empty">
-        <p>Ingen dato valgt ennå.</p>
-      </div>
-    </section>
-  </main>
+        <div id="rosterList" class="roster-list empty">
+          <p class="placeholder">Ingen dato valgt ennå.</p>
+        </div>
+      </section>
+    </main>
 
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <footer class="app__footer">
+      <p>Oppdateres automatisk i sanntid fra Sarahs Google-ark.</p>
+      <p class="app__footer-credit">Laget med ❤️ av Kjell <span>– men egentlig Michael</span></p>
+    </footer>
+  </div>
+
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="script.js"></script>
 </body>
 </html>
