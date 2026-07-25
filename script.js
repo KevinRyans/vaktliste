@@ -20,7 +20,7 @@
     GOOGLE_CLIENT_ID: '1087119477001-la8tomucms7a5khvrd4pn7nb46jjpfap.apps.googleusercontent.com',
 
     // ID-en til Google-arket. Står i URL-en mellom /d/ og /edit.
-    SPREADSHEET_ID: '1DG_437aHLnDJb7q22J9Bmp_31UoAx4-4yeMXoLvYlHw',
+    SPREADSHEET_ID: '1JDu4-YiXdbBxgOF-UdoVAFwFNGb2umueXrpBy7jLM7M',
 
     // Hvor ofte appen sjekker arket for endringer (millisekunder).
     POLL_INTERVAL: 30 * 1000,
